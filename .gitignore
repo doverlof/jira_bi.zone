@@ -1,0 +1,16 @@
+# Виртуальное окружение
+.venv/
+
+# Celery
+celerybeat-schedule.db
+
+# Python кеш
+__pycache__/
+*.pyc
+
+# Состояние приложения
+jira_notifications_state.json
+jira_processed_state.json
+
+# macOS
+.DS_Store
