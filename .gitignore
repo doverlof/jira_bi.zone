@@ -3,7 +3,8 @@
 .env
 # Celery
 celerybeat-schedule.db
-
+data
+logs
 # Python кеш
 __pycache__/
 *.pyc
