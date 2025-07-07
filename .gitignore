@@ -1,6 +1,6 @@
 # Виртуальное окружение
 .venv/
-
+.env
 # Celery
 celerybeat-schedule.db
 
