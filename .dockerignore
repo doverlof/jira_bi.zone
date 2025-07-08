@@ -1,8 +1,5 @@
-# Git
 .git
 .gitignore
-
-# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -26,8 +23,6 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-
-# Virtual environments
 .env
 .venv
 env/
@@ -35,22 +30,14 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
-# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
-
-# OS
 .DS_Store
 Thumbs.db
-
-# Local state files
 jira_notifications_state.json
 jira_processed_state.json
 celerybeat-schedule
-
-# Logs
 *.log

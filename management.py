@@ -16,7 +16,6 @@ def main():
     if len(sys.argv) < 2:
         print("""
 Использование: python management.py <команда>
-
 Доступные команды:
   worker    - Запустить Celery worker
   beat      - Запустить Celery beat (планировщик)
@@ -55,7 +54,7 @@ def main():
         result = get_status.delay()
         status = result.get()
         print(f"""
-📊 Статус системы:
+Статус системы:
    - Отправлено уведомлений: {status.get('sent_notifications', 'N/A')}
    - Обработано задач: {status.get('processed_issues', 'N/A')}
    - Время: {status.get('timestamp', 'N/A')}
