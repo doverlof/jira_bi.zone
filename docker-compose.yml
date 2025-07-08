@@ -10,6 +10,7 @@ services:
     build: .
     container_name: jira_monitor_app
     environment:
+      - TZ=Europe/Moscow
       - CELERY_BROKER_URL=redis://${REDIS_HOST}:${REDIS_PORT}/0
       - CELERY_RESULT_BACKEND=redis://${REDIS_HOST}:${REDIS_PORT}/0
     network_mode: "host"

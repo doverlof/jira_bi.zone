@@ -12,7 +12,6 @@ import logging
 
 logger = get_task_logger(__name__)
 
-# Логирование в файл
 if not os.path.exists('logs'):
     os.makedirs('logs')
 
@@ -25,21 +24,20 @@ logger.addHandler(file_handler)
 
 class JiraCompletedMonitor:
     def __init__(self):
-        # Конфигурация из .env
+        self.redis_host = os.getenv('REDIS_HOST', 'localhost')
+        self.redis_port = int(os.getenv('REDIS_PORT', '6379'))
         self.jira_url = os.getenv('JIRA_URL', 'http://localhost:8080')
         self.jira_user = os.getenv('JIRA_USER', 'admin')
-        self.jira_password = os.getenv('JIRA_PASSWORD', 'admin')
-        self.project_key = os.getenv('JIRA_PROJECT_KEY', 'TEST')
-
+        self.jira_password = os.getenv('JIRA_PASSWORD', 'password')
+        self.project_key = os.getenv('JIRA_PROJECT_KEY', 'PROJECT')
         self.smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
         self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
-        self.email_user = os.getenv('EMAIL_USER', 'sasaka228lol@gmail.com')
-        self.email_password = os.getenv('EMAIL_PASSWORD', 'xdvg xotq wmab mgfk')
-
-        recipients_str = os.getenv('EMAIL_RECIPIENTS', 'sasaka228lol@gmail.com')
+        self.email_user = os.getenv('EMAIL_USER', 'your-email@gmail.com')
+        self.email_password = os.getenv('EMAIL_PASSWORD', 'your-app-password')
+        recipients_str = os.getenv('EMAIL_RECIPIENTS', 'recipient@example.com')
+        self.recipients = [email.strip() for email in recipients_str.split(',')]
         self.recipients = [email.strip() for email in recipients_str.split(',')]
 
-        # Файлы состояния
         if not os.path.exists('data'):
             os.makedirs('data')
 
@@ -273,6 +271,7 @@ def startup_check_jira_tasks(self):
                     monitor.save_state()
                     return f"Отправлено {len(unsent_issues)} стартовых уведомлений"
                 return "Ошибка стартовой отправки"
+            return None
         else:
             logger.info("Все уведомления актуальны")
             monitor.processed_issues = completed_issues
