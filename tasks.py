@@ -36,7 +36,6 @@ class JiraCompletedMonitor:
         self.email_password = os.getenv('EMAIL_PASSWORD', 'your-app-password')
         recipients_str = os.getenv('EMAIL_RECIPIENTS', 'recipient@example.com')
         self.recipients = [email.strip() for email in recipients_str.split(',')]
-        self.recipients = [email.strip() for email in recipients_str.split(',')]
 
         if not os.path.exists('data'):
             os.makedirs('data')
@@ -87,13 +86,61 @@ class JiraCompletedMonitor:
         except Exception as e:
             logger.error(f"Ошибка сохранения состояния: {e}")
 
+    def get_issue_type_category(self, issue_type):
+        """Преобразует тип задачи в категорию"""
+        type_mapping = {
+            'Ошибка': 'Исправление ошибок',
+            'История': 'Обновление существующей функциональности',
+            'Задача': 'Прочие изменения',
+            'Bug': 'Исправление ошибок',
+            'Story': 'Обновление существующей функциональности'
+        }
+        return type_mapping.get(issue_type, 'Прочие изменения')
+
+    def get_latest_release_version(self):
+        """Получает последнюю версию релиза из JIRA"""
+        url = f"{self.jira_url}/rest/api/2/project/{self.project_key}/versions"
+
+        try:
+            logger.info(f"Запрос версий по URL: {url}")
+            response = requests.get(
+                url,
+                auth=HTTPBasicAuth(self.jira_user, self.jira_password),
+                timeout=30
+            )
+            response.raise_for_status()
+            versions = response.json()
+
+            logger.info(f"Получено версий: {len(versions)}")
+            for v in versions:
+                logger.info(f"Версия: {v.get('name')}, Выпущена: {v.get('released', False)}, ID: {v.get('id')}")
+
+            released_versions = [v for v in versions if v.get('released', False)]
+            logger.info(f"Выпущенных версий найдено: {len(released_versions)}")
+
+            if released_versions:
+                latest_version = max(released_versions, key=lambda x: x.get('releaseDate', ''))
+                logger.info(f"Выбрана версия: {latest_version['name']}")
+                return latest_version['name']
+            elif versions:
+                latest_version = max(versions, key=lambda x: x.get('id', 0))
+                logger.info(f"Выбрана последняя созданная версия: {latest_version['name']}")
+                return latest_version['name']
+            else:
+                logger.info("Версий не найдено")
+
+        except Exception as e:
+            logger.error(f"Ошибка получения версий: {e}")
+
+        return None
+
     def get_completed_issues(self):
         jql = f'project = "{self.project_key}" AND status = 10001'
         url = f"{self.jira_url}/rest/api/2/search"
 
         params = {
             'jql': jql,
-            'fields': 'key,summary,assignee,updated,status',
+            'fields': 'key,summary,assignee,updated,status,issuetype',
             'maxResults': 100
         }
 
@@ -119,69 +166,66 @@ class JiraCompletedMonitor:
         task_count = len(issues_list)
         startup_prefix = "[Автозапуск] " if is_startup else ""
 
-        if task_count == 1:
-            subject = f"{startup_prefix}Задача {issues_list[0]['key']} выполнена"
+        version = self.get_latest_release_version()
+
+        if version:
+            subject = f"{startup_prefix}Релиз BI.ZONE Continuous Penetration Testing {version}. Внутренняя рассылка"
         else:
-            subject = f"{startup_prefix}Выполнено задач: {task_count}"
+            if task_count == 1:
+                subject = f"{startup_prefix}Задача {issues_list[0]['key']} выполнена"
+            else:
+                subject = f"{startup_prefix}Выполнено задач: {task_count}"
 
-        startup_note = ""
-        if is_startup:
-            startup_note = """
-            <div style="background-color: #e3f2fd; border-left: 4px solid #2196f3; padding: 10px; margin: 10px 0;">
-                <p><em>🤖 Автономная система обнаружила незафиксированные выполненные задачи</em></p>
-            </div>
-            """
+        tasks_by_category = {}
+        for issue in issues_list:
+            issue_type = issue['fields']['issuetype']['name']
+            logger.info(f"Найден тип задачи: '{issue_type}' для задачи {issue['key']}")  # ДОБАВЛЕНО ЛОГИРОВАНИЕ
+            category = self.get_issue_type_category(issue_type)
+            if category not in tasks_by_category:
+                tasks_by_category[category] = []
+            tasks_by_category[category].append(issue)
 
-        tasks_html = ""
-        for i, issue in enumerate(issues_list, 1):
-            task_key = issue['key']
-            task_summary = issue['fields']['summary']
-            assignee = issue['fields']['assignee']
-            assignee_name = assignee['displayName'] if assignee else 'Не назначен'
+        category_order = [
+            'Обновление существующей функциональности',
+            'Исправление ошибок',
+            'Прочие изменения'
+        ]
 
-            tasks_html += f"""
-            <tr style="{'background-color: #f5f5f5;' if i % 2 == 0 else ''}">
-                <td style="padding: 10px; border: 1px solid #ddd;">
-                    <a href="{self.jira_url}/browse/{task_key}" style="color: #1976d2; text-decoration: none;">
-                        <strong>{task_key}</strong>
-                    </a>
-                </td>
-                <td style="padding: 10px; border: 1px solid #ddd;">{task_summary}</td>
-                <td style="padding: 10px; border: 1px solid #ddd;">{assignee_name}</td>
-            </tr>
-            """
+        changes_html = ""
+
+        for category in category_order:
+            if category in tasks_by_category:
+                tasks = tasks_by_category[category]
+                changes_html += f"<li><strong>{category}</strong><ul>"
+
+                for issue in tasks:
+                    task_key = issue['key']
+                    task_summary = issue['fields']['summary']
+                    changes_html += f'<li><a href="{self.jira_url}/browse/{task_key}">{task_summary}</a></li>'
+
+                changes_html += "</ul></li>"
+
+        if version:
+            greeting_text = f"Вышла новая версия BI.ZONE Continuous Penetration Testing {version}"
+        else:
+            greeting_text = f"Выполнены задачи проекта {self.project_key}. Всего задач: {task_count}"
 
         html_content = f"""
         <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <div style="background-color: #4CAF50; color: white; padding: 20px; text-align: center; border-radius: 5px;">
-                <h1>✅ {"Задача выполнена!" if task_count == 1 else f"Выполнено задач: {task_count}"}</h1>
-            </div>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 20px;">
 
-            {startup_note}
+            <p>Здравствуйте!</p>
 
-            <div style="padding: 20px;">
-                <p><strong>Время:</strong> {datetime.now().strftime('%d.%m.%Y %H:%M')}</p>
-                <p><strong>Проект:</strong> {self.project_key}</p>
-                <p><strong>Система:</strong> 🤖 Автономный мониторинг 24/7</p>
+            <p>{greeting_text}</p>
 
-                <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
-                    <thead>
-                        <tr style="background-color: #4CAF50; color: white;">
-                            <th style="padding: 12px; border: 1px solid #ddd;">Задача</th>
-                            <th style="padding: 12px; border: 1px solid #ddd;">Описание</th>
-                            <th style="padding: 12px; border: 1px solid #ddd;">Исполнитель</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {tasks_html}
-                    </tbody>
-                </table>
+            <ol>
+                {changes_html}
+            </ol>
 
-                <div style="margin-top: 20px; padding: 15px; background-color: #f8f9fa; border-radius: 5px;">
-                    <p><strong>Выполнено:</strong> {task_count} {'задача' if task_count == 1 else 'задач'}</p>
-                </div>
-            </div>
+            <br>
+            <p style="color: #888888; font-size: 14px;">С уважением,<br>
+            Группа разработки EASM платформы, BI.ZONE</p>
+
         </body>
         </html>
         """
