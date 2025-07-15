@@ -40,6 +40,7 @@ class JiraCompletedMonitor:
             'Ошибка': 'Исправление ошибок',
             'История': 'Обновление существующей функциональности',
             'Задача': 'Прочие изменения',
+            # На всякий случай английские варианты
             'Bug': 'Исправление ошибок',
             'Story': 'Обновление существующей функциональности'
         }
@@ -49,7 +50,6 @@ class JiraCompletedMonitor:
         url = f"{self.jira_url}/rest/api/2/project/{self.project_key}/versions"
 
         try:
-            logger.info(f"Запрос версий по URL: {url}")
             response = requests.get(
                 url,
                 auth=HTTPBasicAuth(self.jira_user, self.jira_password),
@@ -58,23 +58,14 @@ class JiraCompletedMonitor:
             response.raise_for_status()
             versions = response.json()
 
-            logger.info(f"Получено версий: {len(versions)}")
-            for v in versions:
-                logger.info(f"Версия: {v.get('name')}, Выпущена: {v.get('released', False)}, ID: {v.get('id')}")
-
             released_versions = [v for v in versions if v.get('released', False)]
-            logger.info(f"Выпущенных версий найдено: {len(released_versions)}")
 
             if released_versions:
                 latest_version = max(released_versions, key=lambda x: x.get('releaseDate', ''))
-                logger.info(f"Выбрана версия: {latest_version['name']}")
                 return latest_version['name']
             elif versions:
                 latest_version = max(versions, key=lambda x: x.get('id', 0))
-                logger.info(f"Выбрана последняя созданная версия: {latest_version['name']}")
                 return latest_version['name']
-            else:
-                logger.info("Версий не найдено")
 
         except Exception as e:
             logger.error(f"Ошибка получения версий: {e}")
@@ -149,7 +140,9 @@ class JiraCompletedMonitor:
         tasks_by_category = {}
         for issue in issues_list:
             issue_type = issue['fields']['issuetype']['name']
+
             logger.info(f"Найден тип задачи: '{issue_type}' для задачи {issue['key']}")
+
             category = self.get_issue_type_category(issue_type)
             if category not in tasks_by_category:
                 tasks_by_category[category] = []
