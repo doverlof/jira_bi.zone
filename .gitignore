@@ -1,7 +1,6 @@
 .venv/
 .env
 celerybeat-schedule.db
-data/
 logs/
 __pycache__/
 *.pyc

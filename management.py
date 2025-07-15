@@ -30,26 +30,26 @@ def main():
     command = sys.argv[1]
 
     if command == "worker":
-        print("🚀 Запуск Celery Worker...")
+        print("Запуск Celery Worker...")
         app.worker_main(['worker', '--loglevel=info', '--concurrency=1'])
 
     elif command == "beat":
-        print("⏰ Запуск Celery Beat (планировщик)...")
+        print("Запуск Celery Beat (планировщик)...")
         app.control.purge()
         app.start(['beat', '--loglevel=info'])
 
     elif command == "monitor":
-        print("📊 Запуск мониторинга Celery...")
+        print("Запуск мониторинга Celery...")
         app.start(['events', '--camera=flower'])
 
     elif command == "reset":
-        print("🔄 Сброс уведомлений...")
+        print("Сброс уведомлений...")
         from tasks import reset_notifications
         result = reset_notifications.delay()
         print(result.get())
 
     elif command == "status":
-        print("📋 Получение статуса...")
+        print("Получение статуса...")
         from tasks import get_status
         result = get_status.delay()
         status = result.get()
@@ -61,7 +61,7 @@ def main():
         """)
 
     elif command == "both":
-        print("🚀 Запуск Worker и Beat одновременно...")
+        print("Запуск Worker и Beat одновременно...")
         import subprocess
         import threading
 

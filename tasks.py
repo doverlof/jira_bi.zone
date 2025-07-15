@@ -4,7 +4,6 @@ import requests
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import json
 import os
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
@@ -24,69 +23,19 @@ logger.addHandler(file_handler)
 
 class JiraCompletedMonitor:
     def __init__(self):
-        self.jira_url = os.getenv('JIRA_URL')  # Для API запросов
-        self.jira_external_url = os.getenv('JIRA_EXTERNAL_URL', 'http://localhost:8080')  # Для ссылок в письме
+        self.jira_url = os.getenv('JIRA_URL')
         self.jira_user = os.getenv('JIRA_USER')
         self.jira_password = os.getenv('JIRA_PASSWORD')
         self.project_key = os.getenv('JIRA_PROJECT_KEY')
         self.smtp_server = os.getenv('SMTP_SERVER')
         self.smtp_port = int(os.getenv('SMTP_PORT'))
+        self.jira_external_url = os.getenv('JIRA_EXTERNAL_URL')
         self.email_user = os.getenv('EMAIL_USER')
         self.email_password = os.getenv('EMAIL_PASSWORD')
         recipients_str = os.getenv('EMAIL_RECIPIENTS')
         self.recipients = [email.strip() for email in recipients_str.split(',')]
 
-        if not os.path.exists('data'):
-            os.makedirs('data')
-
-        self.state_file = "data/jira_notifications_state.json"
-        self.processed_file = "data/jira_processed_state.json"
-
-        self.sent_notifications = set()
-        self.processed_issues = set()
-        self.load_state()
-
-    def load_state(self):
-        try:
-            if os.path.exists(self.state_file):
-                with open(self.state_file, 'r', encoding='utf-8') as f:
-                    state = json.load(f)
-                    self.sent_notifications = set(state.get('sent_notifications', []))
-                    logger.info(f"Загружено {len(self.sent_notifications)} отправленных уведомлений")
-        except Exception as e:
-            logger.error(f"Ошибка загрузки состояния: {e}")
-            self.sent_notifications = set()
-
-        try:
-            if os.path.exists(self.processed_file):
-                with open(self.processed_file, 'r', encoding='utf-8') as f:
-                    state = json.load(f)
-                    self.processed_issues = set(state.get('processed_issues', []))
-                    logger.info(f"Загружено {len(self.processed_issues)} обработанных задач")
-        except Exception as e:
-            logger.error(f"Ошибка загрузки обработанных задач: {e}")
-            self.processed_issues = set()
-
-    def save_state(self):
-        try:
-            with open(self.state_file, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'sent_notifications': list(self.sent_notifications),
-                    'last_updated': datetime.now().isoformat()
-                }, f, ensure_ascii=False, indent=2)
-
-            with open(self.processed_file, 'w', encoding='utf-8') as f:
-                json.dump({
-                    'processed_issues': list(self.processed_issues),
-                    'last_updated': datetime.now().isoformat()
-                }, f, ensure_ascii=False, indent=2)
-
-            logger.info("Состояние сохранено")
-        except Exception as e:
-            logger.error(f"Ошибка сохранения состояния: {e}")
-
     def get_issue_type_category(self, issue_type):
-        """Преобразует тип задачи в категорию"""
         type_mapping = {
             'Ошибка': 'Исправление ошибок',
             'История': 'Обновление существующей функциональности',
@@ -98,7 +47,6 @@ class JiraCompletedMonitor:
         return type_mapping.get(issue_type, 'Прочие изменения')
 
     def get_latest_release_version(self):
-        """Получает последнюю версию релиза из JIRA"""
         url = f"{self.jira_url}/rest/api/2/project/{self.project_key}/versions"
 
         try:
@@ -125,7 +73,29 @@ class JiraCompletedMonitor:
         return None
 
     def get_completed_issues(self):
-        jql = f'project = "{self.project_key}" AND status = 10001'
+        # Получаем настройки периода из .env
+        report_day = int(os.getenv('REPORT_DAY_OF_MONTH'))
+        report_hour = int(os.getenv('REPORT_HOUR'))
+        report_minute = int(os.getenv('REPORT_MINUTE'))
+
+        from datetime import datetime
+
+        now = datetime.now()
+        current_month_start = now.replace(day=report_day, hour=report_hour, minute=report_minute, second=0,
+                                          microsecond=0)
+
+        if current_month_start.month == 1:
+            previous_month_start = current_month_start.replace(year=current_month_start.year - 1, month=12)
+        else:
+            previous_month_start = current_month_start.replace(month=current_month_start.month - 1)
+
+        start_date = previous_month_start.strftime('%Y-%m-%d %H:%M')
+        end_date = current_month_start.strftime('%Y-%m-%d %H:%M')
+
+        logger.info(f"Настройки периода: {report_day}-е число в {report_hour:02d}:{report_minute:02d}")
+        logger.info(f"Период поиска: с {start_date} до {end_date}")
+
+        jql = f'project = "{self.project_key}" AND status CHANGED TO "Done" DURING ("{start_date}", "{end_date}")'
         url = f"{self.jira_url}/rest/api/2/search"
 
         params = {
@@ -135,6 +105,7 @@ class JiraCompletedMonitor:
         }
 
         try:
+            logger.info(f"JQL запрос: {jql}")
             response = requests.get(
                 url,
                 params=params,
@@ -143,7 +114,7 @@ class JiraCompletedMonitor:
             )
             response.raise_for_status()
             data = response.json()
-            logger.info(f"Найдено задач в статусе 'Готово': {data['total']}")
+            logger.info(f"Найдено задач за период: {data['total']}")
             return data, "Готово"
         except Exception as e:
             logger.error(f"Ошибка при запросе задач: {e}")
@@ -169,6 +140,9 @@ class JiraCompletedMonitor:
         tasks_by_category = {}
         for issue in issues_list:
             issue_type = issue['fields']['issuetype']['name']
+
+            logger.info(f"Найден тип задачи: '{issue_type}' для задачи {issue['key']}")
+
             category = self.get_issue_type_category(issue_type)
             if category not in tasks_by_category:
                 tasks_by_category[category] = []
@@ -233,10 +207,6 @@ class JiraCompletedMonitor:
                 server.login(self.email_user, self.email_password)
                 server.send_message(msg)
 
-            for issue in issues_list:
-                self.sent_notifications.add(issue['key'])
-            self.save_state()
-
             task_keys = [issue['key'] for issue in issues_list]
             logger.info(f"Email отправлен для задач: {', '.join(task_keys)}")
             return True
@@ -249,31 +219,23 @@ class JiraCompletedMonitor:
 def check_jira_tasks(self):
     try:
         monitor = JiraCompletedMonitor()
-        logger.info("Автономная проверка JIRA...")
+        logger.info("Отправка ежемесячного отчета...")
 
         data, status_name = monitor.get_completed_issues()
         if not data:
             return "JIRA недоступна"
 
-        current_issues = {issue['key'] for issue in data['issues']}
-        new_completed = current_issues - monitor.processed_issues
+        if data['issues']:
+            logger.info(f"Найдено {len(data['issues'])} задач за период")
 
-        if new_completed:
-            logger.info(f"Найдено {len(new_completed)} новых задач: {list(new_completed)}")
-            new_issues = [issue for issue in data['issues'] if issue['key'] in new_completed]
-
-            if new_issues:
-                success = monitor.send_batch_notification(new_issues, is_startup=False)
-                if success:
-                    monitor.processed_issues.update(new_completed)
-                    monitor.save_state()
-                    return f"Обработано {len(new_issues)} задач автономно"
-                else:
-                    return "Ошибка отправки email"
-            return None
+            success = monitor.send_batch_notification(data['issues'], is_startup=False)
+            if success:
+                return f"Отправлен ежемесячный отчет по {len(data['issues'])} задачам"
+            else:
+                return "Ошибка отправки email"
         else:
-            logger.info("Новых задач нет")
-            return "Новых задач нет"
+            logger.info("За указанный период задач не найдено")
+            return "За указанный период задач не найдено"
 
     except Exception as exc:
         logger.error(f"Ошибка в задаче: {exc}")
@@ -284,32 +246,22 @@ def check_jira_tasks(self):
 def startup_check_jira_tasks(self):
     try:
         monitor = JiraCompletedMonitor()
-        logger.info("Стартовая проверка...")
+        logger.info("Стартовая проверка отчета...")
 
         data, status_name = monitor.get_completed_issues()
         if not data:
             return "JIRA недоступна при запуске"
 
-        completed_issues = {issue['key'] for issue in data['issues']}
-        unsent_notifications = completed_issues - monitor.sent_notifications
+        if data['issues']:
+            logger.info(f"При запуске найдено {len(data['issues'])} задач за период")
 
-        if unsent_notifications:
-            logger.info(f"Найдено {len(unsent_notifications)} неотправленных уведомлений")
-            unsent_issues = [issue for issue in data['issues'] if issue['key'] in unsent_notifications]
-
-            if unsent_issues:
-                success = monitor.send_batch_notification(unsent_issues, is_startup=True)
-                if success:
-                    monitor.processed_issues.update(completed_issues)
-                    monitor.save_state()
-                    return f"Отправлено {len(unsent_issues)} стартовых уведомлений"
-                return "Ошибка стартовой отправки"
-            return None
+            success = monitor.send_batch_notification(data['issues'], is_startup=True)
+            if success:
+                return f"Отправлен стартовый отчет по {len(data['issues'])} задачам"
+            return "Ошибка стартовой отправки"
         else:
-            logger.info("Все уведомления актуальны")
-            monitor.processed_issues = completed_issues
-            monitor.save_state()
-            return "Все уведомления актуальны"
+            logger.info("При запуске за указанный период задач не найдено")
+            return "При запуске за указанный период задач не найдено"
 
     except Exception as exc:
         logger.error(f"Ошибка стартовой задачи: {exc}")
@@ -319,14 +271,10 @@ def startup_check_jira_tasks(self):
 @app.task
 def reset_notifications():
     try:
-        monitor = JiraCompletedMonitor()
-        monitor.sent_notifications.clear()
-        monitor.processed_issues.clear()
-        monitor.save_state()
-        logger.info("Уведомления сброшены")
-        return "Уведомления сброшены"
+        logger.info("Сброс не требуется - система отправляет периодические отчеты")
+        return "Система отправляет периодические отчеты, сброс не требуется"
     except Exception as e:
-        logger.error(f"Ошибка сброса: {e}")
+        logger.error(f"Ошибка: {e}")
         return f"Ошибка: {e}"
 
 
@@ -335,13 +283,11 @@ def get_status():
     try:
         monitor = JiraCompletedMonitor()
         return {
-            'sent_notifications': len(monitor.sent_notifications),
-            'processed_issues': len(monitor.processed_issues),
             'jira_url': monitor.jira_url,
             'project_key': monitor.project_key,
             'recipients': monitor.recipients,
             'timestamp': datetime.now().isoformat(),
-            'status': 'Автономная работа активна'
+            'status': 'Система отправляет периодические отчеты за указанный период'
         }
     except Exception as e:
         return {"error": str(e)}
