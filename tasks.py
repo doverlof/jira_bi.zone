@@ -24,17 +24,16 @@ logger.addHandler(file_handler)
 
 class JiraCompletedMonitor:
     def __init__(self):
-        self.redis_host = os.getenv('REDIS_HOST', 'localhost')
-        self.redis_port = int(os.getenv('REDIS_PORT', '6379'))
-        self.jira_url = os.getenv('JIRA_URL', 'http://localhost:8080')
-        self.jira_user = os.getenv('JIRA_USER', 'admin')
-        self.jira_password = os.getenv('JIRA_PASSWORD', 'password')
-        self.project_key = os.getenv('JIRA_PROJECT_KEY', 'PROJECT')
-        self.smtp_server = os.getenv('SMTP_SERVER', 'smtp.gmail.com')
-        self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
-        self.email_user = os.getenv('EMAIL_USER', 'your-email@gmail.com')
-        self.email_password = os.getenv('EMAIL_PASSWORD', 'your-app-password')
-        recipients_str = os.getenv('EMAIL_RECIPIENTS', 'recipient@example.com')
+        self.jira_url = os.getenv('JIRA_URL')  # Для API запросов
+        self.jira_external_url = os.getenv('JIRA_EXTERNAL_URL', 'http://localhost:8080')  # Для ссылок в письме
+        self.jira_user = os.getenv('JIRA_USER')
+        self.jira_password = os.getenv('JIRA_PASSWORD')
+        self.project_key = os.getenv('JIRA_PROJECT_KEY')
+        self.smtp_server = os.getenv('SMTP_SERVER')
+        self.smtp_port = int(os.getenv('SMTP_PORT'))
+        self.email_user = os.getenv('EMAIL_USER')
+        self.email_password = os.getenv('EMAIL_PASSWORD')
+        recipients_str = os.getenv('EMAIL_RECIPIENTS')
         self.recipients = [email.strip() for email in recipients_str.split(',')]
 
         if not os.path.exists('data'):
@@ -92,6 +91,7 @@ class JiraCompletedMonitor:
             'Ошибка': 'Исправление ошибок',
             'История': 'Обновление существующей функциональности',
             'Задача': 'Прочие изменения',
+            # На всякий случай английские варианты
             'Bug': 'Исправление ошибок',
             'Story': 'Обновление существующей функциональности'
         }
@@ -102,7 +102,6 @@ class JiraCompletedMonitor:
         url = f"{self.jira_url}/rest/api/2/project/{self.project_key}/versions"
 
         try:
-            logger.info(f"Запрос версий по URL: {url}")
             response = requests.get(
                 url,
                 auth=HTTPBasicAuth(self.jira_user, self.jira_password),
@@ -111,23 +110,14 @@ class JiraCompletedMonitor:
             response.raise_for_status()
             versions = response.json()
 
-            logger.info(f"Получено версий: {len(versions)}")
-            for v in versions:
-                logger.info(f"Версия: {v.get('name')}, Выпущена: {v.get('released', False)}, ID: {v.get('id')}")
-
             released_versions = [v for v in versions if v.get('released', False)]
-            logger.info(f"Выпущенных версий найдено: {len(released_versions)}")
 
             if released_versions:
                 latest_version = max(released_versions, key=lambda x: x.get('releaseDate', ''))
-                logger.info(f"Выбрана версия: {latest_version['name']}")
                 return latest_version['name']
             elif versions:
                 latest_version = max(versions, key=lambda x: x.get('id', 0))
-                logger.info(f"Выбрана последняя созданная версия: {latest_version['name']}")
                 return latest_version['name']
-            else:
-                logger.info("Версий не найдено")
 
         except Exception as e:
             logger.error(f"Ошибка получения версий: {e}")
@@ -179,7 +169,6 @@ class JiraCompletedMonitor:
         tasks_by_category = {}
         for issue in issues_list:
             issue_type = issue['fields']['issuetype']['name']
-            logger.info(f"Найден тип задачи: '{issue_type}' для задачи {issue['key']}")  # ДОБАВЛЕНО ЛОГИРОВАНИЕ
             category = self.get_issue_type_category(issue_type)
             if category not in tasks_by_category:
                 tasks_by_category[category] = []
@@ -201,7 +190,7 @@ class JiraCompletedMonitor:
                 for issue in tasks:
                     task_key = issue['key']
                     task_summary = issue['fields']['summary']
-                    changes_html += f'<li><a href="{self.jira_url}/browse/{task_key}">{task_summary}</a></li>'
+                    changes_html += f'<li><a href="{self.jira_external_url}/browse/{task_key}">{task_summary}</a></li>'
 
                 changes_html += "</ul></li>"
 
