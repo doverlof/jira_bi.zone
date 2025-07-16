@@ -73,7 +73,6 @@ class JiraCompletedMonitor:
         return None
 
     def get_completed_issues(self):
-        # Получаем настройки периода из .env
         report_day = int(os.getenv('REPORT_DAY_OF_MONTH'))
         report_hour = int(os.getenv('REPORT_HOUR'))
         report_minute = int(os.getenv('REPORT_MINUTE'))
