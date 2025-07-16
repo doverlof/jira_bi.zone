@@ -80,9 +80,6 @@ python management.py reset
 Логи сохраняются в `logs/jira_monitor.log`
 
 ```bash
-# Просмотр логов
 tail -f logs/jira_monitor.log
-
-# Или для Docker
 docker-compose logs -f jira-monitor
 ```
