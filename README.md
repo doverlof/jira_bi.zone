@@ -65,19 +65,12 @@ python management.py both
 ## Команды управления
 
 ```bash
-# Запуск worker и beat
 python management.py both
-
-# Проверка статуса
 python management.py status
-
-# Сброс системы
 python management.py reset
 ```
 
 ## Проверка работы
-
-Логи сохраняются в `logs/jira_monitor.log`
 
 ```bash
 tail -f logs/jira_monitor.log
