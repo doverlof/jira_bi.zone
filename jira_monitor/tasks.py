@@ -19,7 +19,7 @@ def check_jira_tasks(self):
         if data['issues']:
             logger.info(f"Найдено {len(data['issues'])} задач за период")
 
-            success = monitor.send_batch_notification(data['issues'], is_startup=False)
+            success = monitor.send_batch_notification(data, is_startup=False)
             if success:
                 return f"Отправлен ежемесячный отчет по {len(data['issues'])} задачам"
             else:
@@ -46,7 +46,7 @@ def startup_check_jira_tasks(self):
         if data['issues']:
             logger.info(f"При запуске найдено {len(data['issues'])} задач за период")
 
-            success = monitor.send_batch_notification(data['issues'], is_startup=True)
+            success = monitor.send_batch_notification(data, is_startup=True)
             if success:
                 return f"Отправлен стартовый отчет по {len(data['issues'])} задачам"
             return "Ошибка стартовой отправки"

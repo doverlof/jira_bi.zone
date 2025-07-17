@@ -1,15 +1,15 @@
-
 import requests
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
-
-from .config import Config, ISSUE_TYPE_MAPPING, CATEGORY_ORDER
+from .config import CATEGORY_ORDER
+from .config import Config
 from .logger_config import setup_logger
 
 logger = setup_logger()
+
 
 class JiraCompletedMonitor:
     def __init__(self):
@@ -28,9 +28,8 @@ class JiraCompletedMonitor:
         self.report_day = config.report_day
         self.report_hour = config.report_hour
         self.report_minute = config.report_minute
-
-    def get_issue_type_category(self, issue_type):
-        return ISSUE_TYPE_MAPPING.get(issue_type, 'Прочие изменения')
+        self.release_title_field_id = config.release_title_field_id
+        self.change_field_id = config.change_field_id
 
     def get_latest_release_version(self):
         url = f"{self.jira_url}/rest/api/2/project/{self.project_key}/versions"
@@ -58,6 +57,88 @@ class JiraCompletedMonitor:
 
         return None
 
+    def get_release_title_field_id(self):
+        url = f"{self.jira_url}/rest/api/2/field"
+
+        try:
+            response = requests.get(
+                url,
+                auth=HTTPBasicAuth(self.jira_user, self.jira_password),
+                timeout=30
+            )
+            response.raise_for_status()
+            fields = response.json()
+
+            possible_names = [
+                'Release title',
+            ]
+
+            logger.info("Поиск поля Release title среди доступных полей...")
+
+            for field in fields:
+                field_name = field.get('name', '')
+                field_id = field.get('id', '')
+
+                if field_name in possible_names:
+                    logger.info(f"Найдено поле Release title: ID={field_id}, Name='{field_name}'")
+                    return field_id
+
+                search_terms = ['release title', 'релиз тайтл', 'название релиза']
+                for term in search_terms:
+                    if term.lower() in field_name.lower():
+                        logger.info(f"Найдено похожее поле: ID={field_id}, Name='{field_name}'")
+                        return field_id
+
+            logger.warning("Поле Release title не найдено. Доступные кастомные поля:")
+            for field in fields:
+                if field.get('custom', False):
+                    logger.info(
+                        f"  - ID: {field.get('id')}, Name: '{field.get('name')}', Type: {field.get('schema', {}).get('type', 'unknown')}")
+
+        except Exception as e:
+            logger.error(f"Ошибка получения полей: {e}")
+
+        return None
+
+    def get_change_field_id(self):
+        url = f"{self.jira_url}/rest/api/2/field"
+
+        try:
+            response = requests.get(
+                url,
+                auth=HTTPBasicAuth(self.jira_user, self.jira_password),
+                timeout=30
+            )
+            response.raise_for_status()
+            fields = response.json()
+
+            possible_names = [
+                'Change',
+            ]
+
+            logger.info("Поиск поля Change среди доступных полей...")
+
+            for field in fields:
+                field_name = field.get('name', '')
+                field_id = field.get('id', '')
+
+                if field_name in possible_names:
+                    logger.info(f"Найдено поле Change: ID={field_id}, Name='{field_name}'")
+                    return field_id
+
+                search_terms = ['change', 'изменение']
+                for term in search_terms:
+                    if term.lower() in field_name.lower():
+                        logger.info(f"Найдено похожее поле: ID={field_id}, Name='{field_name}'")
+                        return field_id
+
+            logger.warning("Поле Change не найдено")
+
+        except Exception as e:
+            logger.error(f"Ошибка получения полей Change: {e}")
+
+        return None
+
     def get_completed_issues(self):
         now = datetime.now()
         current_month_start = now.replace(day=self.report_day, hour=self.report_hour,
@@ -74,12 +155,39 @@ class JiraCompletedMonitor:
         logger.info(f"Настройки периода: {self.report_day}-е число в {self.report_hour:02d}:{self.report_minute:02d}")
         logger.info(f"Период поиска: с {start_date} до {end_date}")
 
+        release_title_field = self.release_title_field_id
+        if release_title_field:
+            logger.info(f"Использую ID поля Release title из конфигурации: {release_title_field}")
+        else:
+            logger.info("ID поля Release title не задан в конфигурации, выполняю автоматический поиск...")
+            release_title_field = self.get_release_title_field_id()
+
+        change_field = self.change_field_id
+        if change_field:
+            logger.info(f"Использую ID поля Change из конфигурации: {change_field}")
+        else:
+            logger.info("ID поля Change не задан в конфигурации, выполняю автоматический поиск...")
+            change_field = self.get_change_field_id()
+
         jql = f'project = "{self.project_key}" AND status CHANGED TO "Done" DURING ("{start_date}", "{end_date}")'
         url = f"{self.jira_url}/rest/api/2/search"
 
+        fields = 'key,summary,assignee,updated,status'
+        if release_title_field:
+            fields += f',{release_title_field}'
+            logger.info(f"Добавлено поле Release title к запросу: {release_title_field}")
+        else:
+            logger.warning("Поле Release title не найдено, продолжаем без него")
+
+        if change_field:
+            fields += f',{change_field}'
+            logger.info(f"Добавлено поле Change к запросу: {change_field}")
+        else:
+            logger.warning("Поле Change не найдено, продолжаем без него")
+
         params = {
             'jql': jql,
-            'fields': 'key,summary,assignee,updated,status,issuetype',
+            'fields': fields,
             'maxResults': 100
         }
 
@@ -94,16 +202,53 @@ class JiraCompletedMonitor:
             response.raise_for_status()
             data = response.json()
             logger.info(f"Найдено задач за период: {data['total']}")
+
+            data['release_title_field_id'] = release_title_field
+            data['change_field_id'] = change_field
+
             return data, "Готово"
         except Exception as e:
             logger.error(f"Ошибка при запросе задач: {e}")
             return None, None
 
-    def send_batch_notification(self, issues_list, is_startup=False):
+    def send_batch_notification(self, issues_data, is_startup=False):
+        if isinstance(issues_data, dict):
+            issues_list = issues_data.get('issues', [])
+            release_title_field_id = issues_data.get('release_title_field_id')
+            change_field_id = issues_data.get('change_field_id')
+        else:
+            issues_list = issues_data
+            release_title_field_id = None
+            change_field_id = None
+
         if not issues_list:
             return True
 
-        task_count = len(issues_list)
+        filtered_issues = []
+        for issue in issues_list:
+            if change_field_id and change_field_id in issue['fields']:
+                change_value = issue['fields'][change_field_id]
+                if change_value:
+                    if isinstance(change_value, dict):
+                        change_text = change_value.get('value', '')
+                    else:
+                        change_text = str(change_value)
+
+                    if change_text:
+                        filtered_issues.append(issue)
+                        logger.info(f"Задача {issue['key']} включена в отчет с Change: '{change_text}'")
+                    else:
+                        logger.info(f"Задача {issue['key']} исключена - пустое значение Change")
+                else:
+                    logger.info(f"Задача {issue['key']} исключена - пустое поле Change")
+            else:
+                logger.info(f"Задача {issue['key']} исключена - поле Change отсутствует")
+
+        if not filtered_issues:
+            logger.info("Нет задач с заполненным полем Change для отправки")
+            return True
+
+        task_count = len(filtered_issues)
         startup_prefix = "[Автозапуск] " if is_startup else ""
 
         version = self.get_latest_release_version()
@@ -112,32 +257,76 @@ class JiraCompletedMonitor:
             subject = f"{startup_prefix}Релиз BI.ZONE Continuous Penetration Testing {version}. Внутренняя рассылка"
         else:
             if task_count == 1:
-                subject = f"{startup_prefix}Задача {issues_list[0]['key']} выполнена"
+                subject = f"{startup_prefix}Задача {filtered_issues[0]['key']} выполнена"
             else:
                 subject = f"{startup_prefix}Выполнено задач: {task_count}"
 
-        tasks_by_category = {}
-        for issue in issues_list:
-            issue_type = issue['fields']['issuetype']['name']
+        tasks_by_change = {}
+        for issue in filtered_issues:
+            change_value = issue['fields'].get(change_field_id, '')
 
-            logger.info(f"Найден тип задачи: '{issue_type}' для задачи {issue['key']}")
+            if isinstance(change_value, dict):
+                change_text = change_value.get('value', '')
+            else:
+                change_text = str(change_value) if change_value else ''
 
-            category = self.get_issue_type_category(issue_type)
-            if category not in tasks_by_category:
-                tasks_by_category[category] = []
-            tasks_by_category[category].append(issue)
+            logger.info(f"Найдено значение Change: '{change_text}' для задачи {issue['key']}")
+
+            if change_text not in tasks_by_change:
+                tasks_by_change[change_text] = []
+            tasks_by_change[change_text].append(issue)
 
         changes_html = ""
 
-        for category in CATEGORY_ORDER:
-            if category in tasks_by_category:
-                tasks = tasks_by_category[category]
-                changes_html += f"<li><strong>{category}</strong><ul>"
+        for change_type in CATEGORY_ORDER:
+            if change_type in tasks_by_change:
+                tasks = tasks_by_change[change_type]
+                changes_html += f"<li><strong>{change_type}</strong><ul>"
 
                 for issue in tasks:
                     task_key = issue['key']
                     task_summary = issue['fields']['summary']
-                    changes_html += f'<li><a href="{self.jira_external_url}/browse/{task_key}">{task_summary}</a></li>'
+
+                    release_title = ""
+                    if release_title_field_id and release_title_field_id in issue['fields']:
+                        release_title_value = issue['fields'][release_title_field_id]
+                        if release_title_value:
+                            release_title = release_title_value
+                            logger.info(f"Найден Release title для задачи {task_key}: '{release_title_value}'")
+                        else:
+                            logger.info(f"Release title пустой для задачи {task_key}")
+                    else:
+                        if release_title_field_id:
+                            logger.warning(
+                                f"Поле Release title {release_title_field_id} не найдено в данных задачи {task_key}")
+                        else:
+                            logger.info(f"ID поля Release title не определен для задачи {task_key}")
+
+                    if release_title:
+                        changes_html += f'<li>{release_title}<br><a href="{self.jira_external_url}/browse/{task_key}">{task_summary}</a></li>'
+                    else:
+                        changes_html += f'<li><a href="{self.jira_external_url}/browse/{task_key}">{task_summary}</a></li>'
+
+                changes_html += "</ul></li>"
+
+        for change_type, tasks in tasks_by_change.items():
+            if change_type not in CATEGORY_ORDER:
+                changes_html += f"<li><strong>{change_type}</strong><ul>"
+
+                for issue in tasks:
+                    task_key = issue['key']
+                    task_summary = issue['fields']['summary']
+
+                    release_title = ""
+                    if release_title_field_id and release_title_field_id in issue['fields']:
+                        release_title_value = issue['fields'][release_title_field_id]
+                        if release_title_value:
+                            release_title = release_title_value
+
+                    if release_title:
+                        changes_html += f'<li>{release_title}<br><a href="{self.jira_external_url}/browse/{task_key}">{task_summary}</a></li>'
+                    else:
+                        changes_html += f'<li><a href="{self.jira_external_url}/browse/{task_key}">{task_summary}</a></li>'
 
                 changes_html += "</ul></li>"
 
@@ -180,7 +369,7 @@ class JiraCompletedMonitor:
                 server.login(self.email_user, self.email_password)
                 server.send_message(msg)
 
-            task_keys = [issue['key'] for issue in issues_list]
+            task_keys = [issue['key'] for issue in filtered_issues]
             logger.info(f"Email отправлен для задач: {', '.join(task_keys)}")
             return True
         except Exception as e:
