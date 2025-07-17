@@ -3,15 +3,16 @@
 1. Создайте файл `.env`:
 
 ```bash
-REDIS_HOST=redis
+REDIS_HOST=172.18.0.2
 REDIS_PORT=6379
 
-JIRA_URL=
-JIRA_EXTERNAL_URL=
-
-JIRA_USER=
-JIRA_PASSWORD=
-JIRA_PROJECT_KEY=
+JIRA_URL=http://host.docker.internal:8080
+JIRA_EXTERNAL_URL=http://localhost:8080
+PRODUCT_NAME=BI.ZONE Continuous Penetration Testing
+PROJECT_NAME=EASM
+JIRA_USER=admin
+JIRA_PASSWORD=admin
+JIRA_PROJECT_KEY=TEST
 
 SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587
@@ -82,7 +83,6 @@ docker-compose logs -f jira-monitor
 ```bash
 docker-compose down 
 docker-compose build --no-cache
-rm -f celerybeat-schedule*
 docker-compose up -d
 docker-compose logs -f jira-monitor
 ```
