@@ -14,6 +14,7 @@ class Config:
         self.email_password = os.getenv('EMAIL_PASSWORD')
         recipients_str = os.getenv('EMAIL_RECIPIENTS')
         self.product_name = os.getenv('PRODUCT_NAME')
+        self.project_name = os.getenv('PROJECT_NAME')
         self.recipients = [email.strip() for email in recipients_str.split(',')]
         self.report_day = int(os.getenv('REPORT_DAY_OF_MONTH'))
         self.report_hour = int(os.getenv('REPORT_HOUR'))
@@ -30,7 +31,7 @@ CHANGE_MAPPING = {
     'Other changes': 'Прочие изменения'
 }
 
-CATEGORY_ORDER = [
+CHANGE_ORDER = [
     'Новая функциональность',
     'Обновление существующей функциональности',
     'Улучшения производительности и технические доработки',

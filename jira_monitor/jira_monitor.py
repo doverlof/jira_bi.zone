@@ -4,8 +4,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
-from .config import CATEGORY_ORDER
-from .config import Config
+
+from .config import Config, CHANGE_ORDER, CHANGE_MAPPING
 from .logger_config import setup_logger
 
 logger = setup_logger()
@@ -25,6 +25,7 @@ class JiraCompletedMonitor:
         self.email_password = config.email_password
         self.recipients = config.recipients
         self.product_name = config.product_name
+        self.project_name = config.project_name
         self.report_day = config.report_day
         self.report_hour = config.report_hour
         self.report_minute = config.report_minute
@@ -70,7 +71,7 @@ class JiraCompletedMonitor:
             fields = response.json()
 
             possible_names = [
-                'Release title',
+                'Release title'
             ]
 
             logger.info("Поиск поля Release title среди доступных полей...")
@@ -83,7 +84,7 @@ class JiraCompletedMonitor:
                     logger.info(f"Найдено поле Release title: ID={field_id}, Name='{field_name}'")
                     return field_id
 
-                search_terms = ['release title', 'релиз тайтл', 'название релиза']
+                search_terms = ['release title']
                 for term in search_terms:
                     if term.lower() in field_name.lower():
                         logger.info(f"Найдено похожее поле: ID={field_id}, Name='{field_name}'")
@@ -113,7 +114,7 @@ class JiraCompletedMonitor:
             fields = response.json()
 
             possible_names = [
-                'Change',
+                'Change'
             ]
 
             logger.info("Поиск поля Change среди доступных полей...")
@@ -126,7 +127,7 @@ class JiraCompletedMonitor:
                     logger.info(f"Найдено поле Change: ID={field_id}, Name='{field_name}'")
                     return field_id
 
-                search_terms = ['change', 'изменение']
+                search_terms = ['change']
                 for term in search_terms:
                     if term.lower() in field_name.lower():
                         logger.info(f"Найдено похожее поле: ID={field_id}, Name='{field_name}'")
@@ -254,7 +255,7 @@ class JiraCompletedMonitor:
         version = self.get_latest_release_version()
 
         if version:
-            subject = f"{startup_prefix}Релиз BI.ZONE Continuous Penetration Testing {version}. Внутренняя рассылка"
+            subject = f"{startup_prefix}Релиз {self.product_name} {version}. Внутренняя рассылка"
         else:
             if task_count == 1:
                 subject = f"{startup_prefix}Задача {filtered_issues[0]['key']} выполнена"
@@ -272,20 +273,25 @@ class JiraCompletedMonitor:
 
             logger.info(f"Найдено значение Change: '{change_text}' для задачи {issue['key']}")
 
-            if change_text not in tasks_by_change:
-                tasks_by_change[change_text] = []
-            tasks_by_change[change_text].append(issue)
+            russian_change = CHANGE_MAPPING.get(change_text, change_text)
+
+            if russian_change not in tasks_by_change:
+                tasks_by_change[russian_change] = []
+            tasks_by_change[russian_change].append(issue)
 
         changes_html = ""
+        group_counter = 0
 
-        for change_type in CATEGORY_ORDER:
+        for change_type in CHANGE_ORDER:
             if change_type in tasks_by_change:
+                group_counter += 1
                 tasks = tasks_by_change[change_type]
-                changes_html += f"<li><strong>{change_type}</strong><ul>"
+                changes_html += f"{group_counter}. <strong>{change_type}:</strong><br>"
 
+                task_counter = 0
                 for issue in tasks:
+                    task_counter += 1
                     task_key = issue['key']
-                    task_summary = issue['fields']['summary']
 
                     release_title = ""
                     if release_title_field_id and release_title_field_id in issue['fields']:
@@ -303,19 +309,21 @@ class JiraCompletedMonitor:
                             logger.info(f"ID поля Release title не определен для задачи {task_key}")
 
                     if release_title:
-                        changes_html += f'<li>{release_title}<br><a href="{self.jira_external_url}/browse/{task_key}">{task_summary}</a></li>'
+                        changes_html += f'{group_counter}.{task_counter}. <a href="{self.jira_external_url}/browse/{task_key}">{release_title}</a><br>'
                     else:
-                        changes_html += f'<li><a href="{self.jira_external_url}/browse/{task_key}">{task_summary}</a></li>'
+                        changes_html += f'{group_counter}.{task_counter}. <a href="{self.jira_external_url}/browse/{task_key}">Задача без Release title</a><br>'
 
-                changes_html += "</ul></li>"
+                changes_html += "<br>"
 
         for change_type, tasks in tasks_by_change.items():
-            if change_type not in CATEGORY_ORDER:
-                changes_html += f"<li><strong>{change_type}</strong><ul>"
+            if change_type not in CHANGE_ORDER:
+                group_counter += 1
+                changes_html += f"{group_counter}. <strong>{change_type}:</strong><br>"
 
+                task_counter = 0
                 for issue in tasks:
+                    task_counter += 1
                     task_key = issue['key']
-                    task_summary = issue['fields']['summary']
 
                     release_title = ""
                     if release_title_field_id and release_title_field_id in issue['fields']:
@@ -324,11 +332,11 @@ class JiraCompletedMonitor:
                             release_title = release_title_value
 
                     if release_title:
-                        changes_html += f'<li>{release_title}<br><a href="{self.jira_external_url}/browse/{task_key}">{task_summary}</a></li>'
+                        changes_html += f'{group_counter}.{task_counter}. <a href="{self.jira_external_url}/browse/{task_key}">{release_title}</a><br>'
                     else:
-                        changes_html += f'<li><a href="{self.jira_external_url}/browse/{task_key}">{task_summary}</a></li>'
+                        changes_html += f'{group_counter}.{task_counter}. <a href="{self.jira_external_url}/browse/{task_key}">Задача без Release title</a><br>'
 
-                changes_html += "</ul></li>"
+                changes_html += "<br>"
 
         if version:
             greeting_text = f"Вышла новая версия {self.product_name} {version}"
@@ -343,13 +351,13 @@ class JiraCompletedMonitor:
 
             <p>{greeting_text}</p>
 
-            <ol>
-                {changes_html}
-            </ol>
+            <p><strong>Что нового:</strong></p>
+
+            {changes_html}
 
             <br>
             <p style="color: #888888; font-size: 14px;">С уважением,<br>
-            Группа разработки EASM платформы, BI.ZONE</p>
+            Группа разработки {self.project_name} платформы, BI.ZONE</p>
 
         </body>
         </html>
