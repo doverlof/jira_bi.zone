@@ -76,3 +76,13 @@ python management.py reset
 tail -f logs/jira_monitor.log
 docker-compose logs -f jira-monitor
 ```
+
+## временно
+
+```bash
+docker-compose down 
+docker-compose build --no-cache
+rm -f celerybeat-schedule*
+docker-compose up -d
+docker-compose logs -f jira-monitor
+```
