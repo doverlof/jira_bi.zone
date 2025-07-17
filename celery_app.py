@@ -15,18 +15,14 @@ report_minute = int(os.getenv('REPORT_MINUTE'))
 app.conf.update(
     beat_schedule={
         'check-jira-tasks': {
-            'task': 'tasks.check_jira_tasks',
-
+            'task': 'jira_monitor.tasks.check_jira_tasks',
             'schedule': crontab(day_of_month=report_day, hour=report_hour, minute=report_minute),
-
-
-
         }
     },
     beat_schedule_filename='celerybeat-schedule',
 )
 
-app.autodiscover_tasks(['tasks'])
+app.autodiscover_tasks(['jira_monitor'])
 
 if __name__ == '__main__':
     app.start()
