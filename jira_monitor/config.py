@@ -1,26 +1,59 @@
-import os
+from __future__ import annotations
+from pathlib import Path
+from typing import List
+from pydantic import SecretStr
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+ROOT_DIR = Path(__file__).parent
 
 
-class Config:
-    def __init__(self):
-        self.jira_url = os.getenv('JIRA_URL')
-        self.jira_user = os.getenv('JIRA_USER')
-        self.jira_password = os.getenv('JIRA_PASSWORD')
-        self.project_key = os.getenv('JIRA_PROJECT_KEY')
-        self.smtp_server = os.getenv('SMTP_SERVER')
-        self.smtp_port = int(os.getenv('SMTP_PORT'))
-        self.jira_external_url = os.getenv('JIRA_EXTERNAL_URL')
-        self.email_user = os.getenv('EMAIL_USER')
-        self.email_password = os.getenv('EMAIL_PASSWORD')
-        recipients_str = os.getenv('EMAIL_RECIPIENTS')
-        self.product_name = os.getenv('PRODUCT_NAME')
-        self.project_name = os.getenv('PROJECT_NAME')
-        self.recipients = [email.strip() for email in recipients_str.split(',')]
-        self.report_day = int(os.getenv('REPORT_DAY_OF_MONTH'))
-        self.report_hour = int(os.getenv('REPORT_HOUR'))
-        self.report_minute = int(os.getenv('REPORT_MINUTE'))
-        self.release_title_field_id = os.getenv('RELEASE_TITLE_FIELD_ID')
-        self.change_field_id = os.getenv('CHANGE_FIELD_ID')
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=(ROOT_DIR / ".env"),
+        env_file_encoding="utf-8",
+        extra="ignore",
+        env_nested_delimiter="__",
+    )
+
+    jira_url: str
+    jira_user: str
+    jira_password: SecretStr
+    jira_project_key: str
+    jira_external_url: str
+
+    release_title_field_id: str | None = None
+    change_field_id: str | None = None
+
+    smtp_server: str
+    smtp_port: int = 587
+
+    email_user: str
+    email_password: SecretStr
+    email_recipients: str
+
+    product_name: str
+    project_name: str
+
+    report_day_of_month: int
+    report_hour: int
+    report_minute: int
+
+    redis_host: str = "redis"
+    redis_port: int = 6379
+
+    @classmethod
+    def validate_recipients(cls, v):
+        if not v:
+            raise ValueError('Список получателей не может быть пустым')
+        return v
+
+    @property
+    def recipients_list(self) -> List[str]:
+        return [email.strip() for email in self.email_recipients.split(',')]
+
+    @property
+    def redis_url(self) -> str:
+        return f'redis://{self.redis_host}:{self.redis_port}/0'
 
 
 CHANGE_MAPPING = {
@@ -38,3 +71,5 @@ CHANGE_ORDER = [
     'Исправление ошибок',
     'Прочие изменения'
 ]
+
+settings = Settings

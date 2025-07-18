@@ -43,13 +43,13 @@ def main():
 
     elif command == "reset":
         print("Сброс уведомлений...")
-        from jira_monitor import reset_notifications
+        from jira_monitor.tasks import reset_notifications
         result = reset_notifications.delay()
         print(result.get())
 
     elif command == "status":
         print("Получение статуса...")
-        from jira_monitor import get_status
+        from jira_monitor.tasks import get_status
         result = get_status.delay()
         status = result.get()
         print(f"""
