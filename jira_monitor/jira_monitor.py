@@ -1,11 +1,12 @@
 import requests
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
+
+from .clients.email_client import EmailContentGenerator
 from .logger_config import setup_logger
-from .config import settings, CHANGE_ORDER, CHANGE_MAPPING
+from .config import settings
 from .clients import SMTPClient
 logger = setup_logger()
-
 
 class JiraCompletedMonitor:
     def __init__(self):
@@ -21,13 +22,14 @@ class JiraCompletedMonitor:
         self.report_minute = settings.report_minute
         self.release_title_field_id = settings.release_title_field_id
         self.change_field_id = settings.change_field_id
+
         self.smtp_client = SMTPClient(
             smtp_server=settings.smtp_server,
             smtp_port=settings.smtp_port,
             email_user=settings.email_user,
             email_password=settings.email_password.get_secret_value()
         )
-
+        self.email_generator = EmailContentGenerator()
 
     def get_latest_release_version(self):
         url = f"{self.jira_url}/rest/api/2/project/{self.project_key}/versions"
@@ -210,156 +212,21 @@ class JiraCompletedMonitor:
             return None, None
 
     def send_batch_notification(self, issues_data, is_startup=False):
-        if isinstance(issues_data, dict):
-            issues_list = issues_data.get('issues', [])
-            release_title_field_id = issues_data.get('release_title_field_id')
-            change_field_id = issues_data.get('change_field_id')
-        else:
-            issues_list = issues_data
-            release_title_field_id = None
-            change_field_id = None
 
-        if not issues_list:
+        if not issues_data:
+            logger.info("Нет данных о задачах для отправки")
             return True
-
-        filtered_issues = []
-        for issue in issues_list:
-            if change_field_id and change_field_id in issue['fields']:
-                change_value = issue['fields'][change_field_id]
-                if change_value:
-                    if isinstance(change_value, dict):
-                        change_text = change_value.get('value', '')
-                    else:
-                        change_text = str(change_value)
-
-                    if change_text:
-                        filtered_issues.append(issue)
-                        logger.info(f"Задача {issue['key']} включена в отчет с Change: '{change_text}'")
-                    else:
-                        logger.info(f"Задача {issue['key']} исключена - пустое значение Change")
-                else:
-                    logger.info(f"Задача {issue['key']} исключена - пустое поле Change")
-            else:
-                logger.info(f"Задача {issue['key']} исключена - поле Change отсутствует")
-
-        if not filtered_issues:
-            logger.info("Нет задач с заполненным полем Change для отправки")
-            return True
-
-        task_count = len(filtered_issues)
-        startup_prefix = "[Автозапуск] " if is_startup else ""
 
         version = self.get_latest_release_version()
 
-        if version:
-            subject = f"{startup_prefix}Релиз {self.product_name} {version}. Внутренняя рассылка"
-        else:
-            if task_count == 1:
-                subject = f"{startup_prefix}Задача {filtered_issues[0]['key']} выполнена"
-            else:
-                subject = f"{startup_prefix}Выполнено задач: {task_count}"
-
-        tasks_by_change = {}
-        for issue in filtered_issues:
-            change_value = issue['fields'].get(change_field_id, '')
-
-            if isinstance(change_value, dict):
-                change_text = change_value.get('value', '')
-            else:
-                change_text = str(change_value) if change_value else ''
-
-            logger.info(f"Найдено значение Change: '{change_text}' для задачи {issue['key']}")
-
-            russian_change = CHANGE_MAPPING.get(change_text, change_text)
-
-            if russian_change not in tasks_by_change:
-                tasks_by_change[russian_change] = []
-            tasks_by_change[russian_change].append(issue)
-
-        changes_html = ""
-        group_counter = 0
-
-        for change_type in CHANGE_ORDER:
-            if change_type in tasks_by_change:
-                group_counter += 1
-                tasks = tasks_by_change[change_type]
-                changes_html += f"{group_counter}. <strong>{change_type}:</strong><br>"
-
-                task_counter = 0
-                for issue in tasks:
-                    task_counter += 1
-                    task_key = issue['key']
-
-                    release_title = ""
-                    if release_title_field_id and release_title_field_id in issue['fields']:
-                        release_title_value = issue['fields'][release_title_field_id]
-                        if release_title_value:
-                            release_title = release_title_value
-                            logger.info(f"Найден Release title для задачи {task_key}: '{release_title_value}'")
-                        else:
-                            logger.info(f"Release title пустой для задачи {task_key}")
-                    else:
-                        if release_title_field_id:
-                            logger.warning(
-                                f"Поле Release title {release_title_field_id} не найдено в данных задачи {task_key}")
-                        else:
-                            logger.info(f"ID поля Release title не определен для задачи {task_key}")
-
-                    if release_title:
-                        changes_html += f'{group_counter}.{task_counter}. <a href="{self.jira_external_url}/browse/{task_key}">{release_title}</a><br>'
-                    else:
-                        changes_html += f'{group_counter}.{task_counter}. <a href="{self.jira_external_url}/browse/{task_key}">Задача без Release title</a><br>'
-
-                changes_html += "<br>"
-
-        for change_type, tasks in tasks_by_change.items():
-            if change_type not in CHANGE_ORDER:
-                group_counter += 1
-                changes_html += f"{group_counter}. <strong>{change_type}:</strong><br>"
-
-                task_counter = 0
-                for issue in tasks:
-                    task_counter += 1
-                    task_key = issue['key']
-
-                    release_title = ""
-                    if release_title_field_id and release_title_field_id in issue['fields']:
-                        release_title_value = issue['fields'][release_title_field_id]
-                        if release_title_value:
-                            release_title = release_title_value
-
-                    if release_title:
-                        changes_html += f'{group_counter}.{task_counter}. <a href="{self.jira_external_url}/browse/{task_key}">{release_title}</a><br>'
-                    else:
-                        changes_html += f'{group_counter}.{task_counter}. <a href="{self.jira_external_url}/browse/{task_key}">Задача без Release title</a><br>'
-
-                changes_html += "<br>"
-
-        if version:
-            greeting_text = f"Вышла новая версия {self.product_name} {version}"
-        else:
-            greeting_text = f"Выполнены задачи проекта {self.project_key}. Всего задач: {task_count}"
-
-        html_content = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; margin: 20px;">
-
-            <p>Здравствуйте!</p>
-
-            <p>{greeting_text}</p>
-
-            <p><strong>Что нового:</strong></p>
-
-            {changes_html}
-
-            <br>
-            <p style="color: #888888; font-size: 14px;">С уважением,<br>
-            Группа разработки {self.project_name} платформы, BI.ZONE</p>
-
-        </body>
-        </html>
-        """
-
+        subject, html_content = self.email_generator.generate_email_content(
+            issues_data=issues_data,
+            version=version,
+            is_startup=is_startup
+        )
+        if not subject or not html_content:
+            logger.info("Нет задач с заполненным полем Change для отправки")
+            return True
         success = self.smtp_client.send_email(
             recipients=settings.recipients_list,
             subject=subject,
@@ -367,9 +234,52 @@ class JiraCompletedMonitor:
         )
 
         if success:
-            task_keys = [issue['key'] for issue in filtered_issues]
-            logger.info(f"Email отправлен для задач: {', '.join(task_keys)}")
+            if isinstance(issues_data, dict):
+                issues_list = issues_data.get('issues', [])
+                change_field_id = issues_data.get('change_field_id')
+
+                # Фильтруем задачи с заполненным полем Change для логирования
+                filtered_keys = []
+                for issue in issues_list:
+                    if change_field_id and change_field_id in issue['fields']:
+                        change_value = issue['fields'][change_field_id]
+                        if change_value:
+                            if isinstance(change_value, dict):
+                                change_text = change_value.get('value', '')
+                            else:
+                                change_text = str(change_value)
+
+                            if change_text:
+                                filtered_keys.append(issue['key'])
+
+                if filtered_keys:
+                    logger.info(f"Email отправлен для задач: {', '.join(filtered_keys)}")
+                else:
+                    logger.info("Email отправлен, но задачи для логирования не найдены")
+            else:
+                logger.info("Email отправлен")
+
             return True
         else:
             logger.error("Ошибка отправки email")
+            return False
+
+    def send_simple_notification(self, issue_key: str, summary: str):
+
+        subject, text_content = self.email_generator.generate_simple_notification(
+            issue_key=issue_key,
+            summary=summary
+        )
+
+        success = self.smtp_client.send_simple_email(
+            recipients=settings.recipients_list,
+            subject=subject,
+            text_content=text_content
+        )
+
+        if success:
+            logger.info(f"Простое уведомление отправлено для задачи {issue_key}")
+            return True
+        else:
+            logger.error(f"Ошибка отправки простого уведомления для задачи {issue_key}")
             return False
