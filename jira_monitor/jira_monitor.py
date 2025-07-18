@@ -1,12 +1,9 @@
 import requests
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
-from .config import settings, CHANGE_ORDER, CHANGE_MAPPING
 from .logger_config import setup_logger
-
+from .config import settings, CHANGE_ORDER, CHANGE_MAPPING
+from .clients import SMTPClient
 logger = setup_logger()
 
 
@@ -16,12 +13,7 @@ class JiraCompletedMonitor:
         self.jira_user = settings.jira_user
         self.jira_password = settings.jira_password.get_secret_value()
         self.project_key = settings.jira_project_key
-        self.smtp_server = settings.smtp_server
-        self.smtp_port = settings.smtp_port
         self.jira_external_url = settings.jira_external_url
-        self.email_user = settings.email_user
-        self.email_password = settings.email_password.get_secret_value()
-        self.recipients = settings.recipients_list
         self.product_name = settings.product_name
         self.project_name = settings.project_name
         self.report_day = settings.report_day_of_month
@@ -29,6 +21,12 @@ class JiraCompletedMonitor:
         self.report_minute = settings.report_minute
         self.release_title_field_id = settings.release_title_field_id
         self.change_field_id = settings.change_field_id
+        self.smtp_client = SMTPClient(
+            smtp_server=settings.smtp_server,
+            smtp_port=settings.smtp_port,
+            email_user=settings.email_user,
+            email_password=settings.email_password.get_secret_value()
+        )
 
 
     def get_latest_release_version(self):
@@ -362,23 +360,16 @@ class JiraCompletedMonitor:
         </html>
         """
 
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = subject
-        msg['From'] = self.email_user
-        msg['To'] = ', '.join(self.recipients)
+        success = self.smtp_client.send_email(
+            recipients=settings.recipients_list,
+            subject=subject,
+            html_content=html_content
+        )
 
-        html_part = MIMEText(html_content, 'html', 'utf-8')
-        msg.attach(html_part)
-
-        try:
-            with smtplib.SMTP(self.smtp_server, self.smtp_port) as server:
-                server.starttls()
-                server.login(self.email_user, self.email_password)
-                server.send_message(msg)
-
+        if success:
             task_keys = [issue['key'] for issue in filtered_issues]
             logger.info(f"Email отправлен для задач: {', '.join(task_keys)}")
             return True
-        except Exception as e:
-            logger.error(f"Ошибка отправки email: {e}")
+        else:
+            logger.error("Ошибка отправки email")
             return False

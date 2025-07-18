@@ -12,11 +12,12 @@ app.conf.update(
     beat_schedule={
         'check-jira-tasks': {
             'task': 'jira_monitor.tasks.check_jira_tasks',
-            'schedule': crontab(
-                day_of_month=settings.report_day_of_month,
-                hour=settings.report_hour,
-                minute=settings.report_minute
-            ),
+            # 'schedule': crontab(
+            #     day_of_month=settings.report_day_of_month,
+            #     hour=settings.report_hour,
+            #     minute=settings.report_minute
+            # ),
+            'schedule': 10.0,
         }
     },
     beat_schedule_filename='celerybeat-schedule',
