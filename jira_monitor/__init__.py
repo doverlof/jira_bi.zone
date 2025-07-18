@@ -1,15 +1,10 @@
 from .jira_monitor import JiraCompletedMonitor
-from .tasks import check_jira_tasks, startup_check_jira_tasks, reset_notifications, get_status
-from .config import Config, CHANGE_MAPPING, CHANGE_ORDER
+from .config import settings, CHANGE_MAPPING, CHANGE_ORDER
 from .logger_config import setup_logger
 
 __all__ = [
     'JiraCompletedMonitor',
-    'check_jira_tasks',
-    'startup_check_jira_tasks',
-    'reset_notifications',
-    'get_status',
-    'Config',
+    'settings',
     'CHANGE_MAPPING',
     'CHANGE_ORDER',
     'setup_logger'

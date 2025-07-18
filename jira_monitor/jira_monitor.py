@@ -4,8 +4,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
-
-from .config import Config, CHANGE_ORDER, CHANGE_MAPPING
+from .config import settings, CHANGE_ORDER, CHANGE_MAPPING  # Вместо Config
 from .logger_config import setup_logger
 
 logger = setup_logger()
@@ -13,24 +12,24 @@ logger = setup_logger()
 
 class JiraCompletedMonitor:
     def __init__(self):
-        config = Config()
-        self.jira_url = config.jira_url
-        self.jira_user = config.jira_user
-        self.jira_password = config.jira_password
-        self.project_key = config.project_key
-        self.smtp_server = config.smtp_server
-        self.smtp_port = config.smtp_port
-        self.jira_external_url = config.jira_external_url
-        self.email_user = config.email_user
-        self.email_password = config.email_password
-        self.recipients = config.recipients
-        self.product_name = config.product_name
-        self.project_name = config.project_name
-        self.report_day = config.report_day
-        self.report_hour = config.report_hour
-        self.report_minute = config.report_minute
-        self.release_title_field_id = config.release_title_field_id
-        self.change_field_id = config.change_field_id
+        self.jira_url = settings.jira_url
+        self.jira_user = settings.jira_user
+        self.jira_password = settings.jira_password.get_secret_value()  # Для SecretStr
+        self.project_key = settings.jira_project_key
+        self.smtp_server = settings.smtp_server
+        self.smtp_port = settings.smtp_port
+        self.jira_external_url = settings.jira_external_url
+        self.email_user = settings.email_user
+        self.email_password = settings.email_password.get_secret_value()
+        self.recipients = settings.recipients_list
+        self.product_name = settings.product_name
+        self.project_name = settings.project_name
+        self.report_day = settings.report_day_of_month
+        self.report_hour = settings.report_hour
+        self.report_minute = settings.report_minute
+        self.release_title_field_id = settings.release_title_field_id
+        self.change_field_id = settings.change_field_id
+
 
     def get_latest_release_version(self):
         url = f"{self.jira_url}/rest/api/2/project/{self.project_key}/versions"

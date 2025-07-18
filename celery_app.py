@@ -1,22 +1,22 @@
 from celery import Celery
 from celery.schedules import crontab
-import os
+from jira_monitor.config import settings
 
 app = Celery('jira_monitor',
-             broker='redis://redis:6379/0',
-             backend='redis://redis:6379/0')
+             broker=settings.redis_url,
+             backend=settings.redis_url)
 
 app.config_from_object('celeryconfig')
-
-report_day = int(os.getenv('REPORT_DAY_OF_MONTH'))
-report_hour = int(os.getenv('REPORT_HOUR'))
-report_minute = int(os.getenv('REPORT_MINUTE'))
 
 app.conf.update(
     beat_schedule={
         'check-jira-tasks': {
             'task': 'jira_monitor.tasks.check_jira_tasks',
-            'schedule': crontab(day_of_month=report_day, hour=report_hour, minute=report_minute),
+            'schedule': crontab(
+                day_of_month=settings.report_day_of_month,
+                hour=settings.report_hour,
+                minute=settings.report_minute
+            ),
         }
     },
     beat_schedule_filename='celerybeat-schedule',
