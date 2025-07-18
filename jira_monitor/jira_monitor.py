@@ -238,7 +238,6 @@ class JiraCompletedMonitor:
                 issues_list = issues_data.get('issues', [])
                 change_field_id = issues_data.get('change_field_id')
 
-                # Фильтруем задачи с заполненным полем Change для логирования
                 filtered_keys = []
                 for issue in issues_list:
                     if change_field_id and change_field_id in issue['fields']:
