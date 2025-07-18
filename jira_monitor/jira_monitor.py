@@ -4,7 +4,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from requests.auth import HTTPBasicAuth
 from datetime import datetime
-from .config import settings, CHANGE_ORDER, CHANGE_MAPPING  # Вместо Config
+from .config import settings, CHANGE_ORDER, CHANGE_MAPPING
 from .logger_config import setup_logger
 
 logger = setup_logger()
@@ -14,7 +14,7 @@ class JiraCompletedMonitor:
     def __init__(self):
         self.jira_url = settings.jira_url
         self.jira_user = settings.jira_user
-        self.jira_password = settings.jira_password.get_secret_value()  # Для SecretStr
+        self.jira_password = settings.jira_password.get_secret_value()
         self.project_key = settings.jira_project_key
         self.smtp_server = settings.smtp_server
         self.smtp_port = settings.smtp_port
