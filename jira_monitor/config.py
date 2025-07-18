@@ -4,8 +4,7 @@ from typing import List
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ROOT_DIR = Path(__file__).parent
-
+ROOT_DIR = Path(__file__).parent.parent
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -72,4 +71,4 @@ CHANGE_ORDER = [
     'Прочие изменения'
 ]
 
-settings = Settings
+settings = Settings()
