@@ -1,12 +1,15 @@
 import requests
 from requests.auth import HTTPBasicAuth
-from datetime import datetime
 
-from .clients.email_client import EmailContentGenerator
+from .clients.smtp_client import SMTPClient
+from .clients.jira_auth import JiraAuth
+from .clients.jira_issues import JiraIssues
+from .clients.email_generator import EmailGenerator
 from .logger_config import setup_logger
 from .config import settings
-from .clients import SMTPClient
+
 logger = setup_logger()
+
 
 class JiraCompletedMonitor:
     def __init__(self):
@@ -29,7 +32,28 @@ class JiraCompletedMonitor:
             email_user=settings.email_user,
             email_password=settings.email_password.get_secret_value()
         )
-        self.email_generator = EmailContentGenerator()
+
+        self.jira_auth = JiraAuth(
+            jira_url=self.jira_url,
+            jira_user=self.jira_user,
+            jira_password=self.jira_password
+        )
+
+        self.jira_issues = JiraIssues(
+            jira_url=self.jira_url,
+            auth=self.jira_auth.get_auth(),
+            project_key=self.project_key,
+            report_day=self.report_day,
+            report_hour=self.report_hour,
+            report_minute=self.report_minute
+        )
+
+        self.email_generator = EmailGenerator(
+            product_name=self.product_name,
+            project_name=self.project_name,
+            jira_external_url=self.jira_external_url,
+            project_key=self.project_key
+        )
 
     def get_latest_release_version(self):
         url = f"{self.jira_url}/rest/api/2/project/{self.project_key}/versions"
@@ -57,162 +81,27 @@ class JiraCompletedMonitor:
 
         return None
 
-    def get_release_title_field_id(self):
-        url = f"{self.jira_url}/rest/api/2/field"
-
-        try:
-            response = requests.get(
-                url,
-                auth=HTTPBasicAuth(self.jira_user, self.jira_password),
-                timeout=30
-            )
-            response.raise_for_status()
-            fields = response.json()
-
-            possible_names = [
-                'Release title'
-            ]
-
-            logger.info("Поиск поля Release title среди доступных полей...")
-
-            for field in fields:
-                field_name = field.get('name', '')
-                field_id = field.get('id', '')
-
-                if field_name in possible_names:
-                    logger.info(f"Найдено поле Release title: ID={field_id}, Name='{field_name}'")
-                    return field_id
-
-                search_terms = ['release title']
-                for term in search_terms:
-                    if term.lower() in field_name.lower():
-                        logger.info(f"Найдено похожее поле: ID={field_id}, Name='{field_name}'")
-                        return field_id
-
-            logger.warning("Поле Release title не найдено. Доступные кастомные поля:")
-            for field in fields:
-                if field.get('custom', False):
-                    logger.info(
-                        f"  - ID: {field.get('id')}, Name: '{field.get('name')}', Type: {field.get('schema', {}).get('type', 'unknown')}")
-
-        except Exception as e:
-            logger.error(f"Ошибка получения полей: {e}")
-
-        return None
-
-    def get_change_field_id(self):
-        url = f"{self.jira_url}/rest/api/2/field"
-
-        try:
-            response = requests.get(
-                url,
-                auth=HTTPBasicAuth(self.jira_user, self.jira_password),
-                timeout=30
-            )
-            response.raise_for_status()
-            fields = response.json()
-
-            possible_names = [
-                'Change'
-            ]
-
-            logger.info("Поиск поля Change среди доступных полей...")
-
-            for field in fields:
-                field_name = field.get('name', '')
-                field_id = field.get('id', '')
-
-                if field_name in possible_names:
-                    logger.info(f"Найдено поле Change: ID={field_id}, Name='{field_name}'")
-                    return field_id
-
-                search_terms = ['change']
-                for term in search_terms:
-                    if term.lower() in field_name.lower():
-                        logger.info(f"Найдено похожее поле: ID={field_id}, Name='{field_name}'")
-                        return field_id
-
-            logger.warning("Поле Change не найдено")
-
-        except Exception as e:
-            logger.error(f"Ошибка получения полей Change: {e}")
-
-        return None
-
     def get_completed_issues(self):
-        now = datetime.now()
-        current_month_start = now.replace(day=self.report_day, hour=self.report_hour,
-                                          minute=self.report_minute, second=0, microsecond=0)
-
-        if current_month_start.month == 1:
-            previous_month_start = current_month_start.replace(year=current_month_start.year - 1, month=12)
-        else:
-            previous_month_start = current_month_start.replace(month=current_month_start.month - 1)
-
-        start_date = previous_month_start.strftime('%Y-%m-%d %H:%M')
-        end_date = current_month_start.strftime('%Y-%m-%d %H:%M')
-
         logger.info(f"Настройки периода: {self.report_day}-е число в {self.report_hour:02d}:{self.report_minute:02d}")
-        logger.info(f"Период поиска: с {start_date} до {end_date}")
 
         release_title_field = self.release_title_field_id
         if release_title_field:
             logger.info(f"Использую ID поля Release title из конфигурации: {release_title_field}")
         else:
             logger.info("ID поля Release title не задан в конфигурации, выполняю автоматический поиск...")
-            release_title_field = self.get_release_title_field_id()
 
         change_field = self.change_field_id
         if change_field:
             logger.info(f"Использую ID поля Change из конфигурации: {change_field}")
         else:
             logger.info("ID поля Change не задан в конфигурации, выполняю автоматический поиск...")
-            change_field = self.get_change_field_id()
 
-        jql = f'project = "{self.project_key}" AND status CHANGED TO "Done" DURING ("{start_date}", "{end_date}")'
-        url = f"{self.jira_url}/rest/api/2/search"
-
-        fields = 'key,summary,assignee,updated,status'
-        if release_title_field:
-            fields += f',{release_title_field}'
-            logger.info(f"Добавлено поле Release title к запросу: {release_title_field}")
-        else:
-            logger.warning("Поле Release title не найдено, продолжаем без него")
-
-        if change_field:
-            fields += f',{change_field}'
-            logger.info(f"Добавлено поле Change к запросу: {change_field}")
-        else:
-            logger.warning("Поле Change не найдено, продолжаем без него")
-
-        params = {
-            'jql': jql,
-            'fields': fields,
-            'maxResults': 100
-        }
-
-        try:
-            logger.info(f"JQL запрос: {jql}")
-            response = requests.get(
-                url,
-                params=params,
-                auth=HTTPBasicAuth(self.jira_user, self.jira_password),
-                timeout=30
-            )
-            response.raise_for_status()
-            data = response.json()
-            logger.info(f"Найдено задач за период: {data['total']}")
-
-            data['release_title_field_id'] = release_title_field
-            data['change_field_id'] = change_field
-
-            return data, "Готово"
-        except Exception as e:
-            logger.error(f"Ошибка при запросе задач: {e}")
-            return None, None
+        return self.jira_issues.get_completed_issues(
+            release_title_field_id=release_title_field,
+            change_field_id=change_field
+        )
 
     def send_batch_notification(self, issues_data, is_startup=False):
-
         if not issues_data:
             logger.info("Нет данных о задачах для отправки")
             return True
@@ -224,9 +113,11 @@ class JiraCompletedMonitor:
             version=version,
             is_startup=is_startup
         )
+
         if not subject or not html_content:
             logger.info("Нет задач с заполненным полем Change для отправки")
             return True
+
         success = self.smtp_client.send_email(
             recipients=settings.recipients_list,
             subject=subject,
@@ -264,7 +155,6 @@ class JiraCompletedMonitor:
             return False
 
     def send_simple_notification(self, issue_key: str, summary: str):
-
         subject, text_content = self.email_generator.generate_simple_notification(
             issue_key=issue_key,
             summary=summary
