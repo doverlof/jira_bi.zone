@@ -17,7 +17,7 @@ app.conf.update(
             #     hour=settings.report_hour,
             #     minute=settings.report_minute
             # ),
-            'schedule': 10.0,
+            'schedule': 20.0,
         }
     },
     beat_schedule_filename='celerybeat-schedule',
