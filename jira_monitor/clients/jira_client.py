@@ -1,13 +1,18 @@
+from jira import JIRA
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Any, Optional
 from ..logger_config import setup_logger
 
 logger = setup_logger()
 
 
-class IssuesClient:
-    def __init__(self, jira_client, project_key: str, report_day: int, report_hour: int, report_minute: int):
-        self.jira = jira_client
+class JiraClient:
+    def __init__(self, jira_url: str, jira_token: str, project_key: str, report_day: int, report_hour: int, report_minute: int):
+        self.jira = JIRA(
+            token_auth=jira_token,
+            options={"server": jira_url, "verify": False},
+            async_=True,
+        )
         self.project_key = project_key
         self.report_day = report_day
         self.report_hour = report_hour
@@ -140,3 +145,12 @@ class IssuesClient:
         except Exception as e:
             logger.error(f"Ошибка фильтрации задач: {e}")
             return {'issues': [], 'total': 0}, None
+
+    def project(self, project_key: str):
+        return self.jira.project(project_key)
+
+    def project_versions(self, project):
+        return self.jira.project_versions(project)
+
+    def myself(self):
+        return self.jira.myself()
