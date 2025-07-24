@@ -1,4 +1,4 @@
-from .clients import SMTPClient, UserClient, IssuesClient, EmailClient
+from .clients import SMTPClient, JiraClient, EmailClient
 from .logger_config import setup_logger
 from .config import settings
 
@@ -26,15 +26,9 @@ class JiraCompletedMonitor:
             email_password=settings.email_password.get_secret_value()
         )
 
-        self.user_client = UserClient(
+        self.jira_client = JiraClient(
             jira_url=self.jira_url,
-            jira_token=self.jira_token
-        )
-
-        jira_client = self.user_client.jira
-
-        self.issues_client = IssuesClient(
-            jira_client=jira_client,
+            jira_token=self.jira_token,
             project_key=self.project_key,
             report_day=self.report_day,
             report_hour=self.report_hour,
@@ -43,7 +37,7 @@ class JiraCompletedMonitor:
 
         self.email_client = EmailClient(
             smtp_client=self.smtp_client,
-            jira_client=jira_client,
+            jira_client=self.jira_client.jira,
             product_name=self.product_name,
             project_name=self.project_name,
             jira_external_url=self.jira_external_url,
@@ -61,17 +55,17 @@ class JiraCompletedMonitor:
             smtp_ok = False
 
         try:
-            self.user_client.jira.myself()
-            user_ok = True
+            self.jira_client.myself()
+            jira_ok = True
             logger.info("Jira тест успешен")
         except Exception as e:
             logger.error(f"Jira тест неудачен: {e}")
-            user_ok = False
+            jira_ok = False
 
-        return smtp_ok and user_ok
+        return smtp_ok and jira_ok
 
     def get_completed_issues(self):
-        return self.issues_client.filter_completed_issues(
+        return self.jira_client.filter_completed_issues(
             release_title_field_id=self.release_title_field_id,
             change_field_id=self.change_field_id
         )
