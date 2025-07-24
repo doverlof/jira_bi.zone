@@ -1,6 +1,6 @@
-from .smtp_client import SMTPClient
-from .jira_auth import JiraAuth
-from .jira_issues import JiraIssues
-from .email_generator import EmailGenerator
+__all__ = ['SMTPClient', 'UserClient', 'IssuesClient', 'EmailClient']
 
-__all__ = ['SMTPClient', 'JiraAuth', 'JiraIssues', 'EmailGenerator']
+from jira_monitor.clients.email_generator import EmailClient
+from jira_monitor.clients.jira_auth import UserClient
+from jira_monitor.clients.jira_issues import IssuesClient
+from jira_monitor.clients.smtp_client import SMTPClient

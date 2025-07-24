@@ -1,65 +1,68 @@
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Any, Tuple
 from ..logger_config import setup_logger
 
 logger = setup_logger()
 
 
-class EmailGenerator:
-    def __init__(self, product_name: str, project_name: str, jira_external_url: str, project_key: str):
+def group_tasks_by_change(issues: List[Dict], change_field_id: str) -> Dict[str, List[Dict]]:
+    change_mapping = {
+        'New features': 'Новая функциональность',
+        'Functionality update': 'Обновление существующей функциональности',
+        'Performance enhancements': 'Улучшения производительности и технические доработки',
+        'Bug fixes': 'Исправление ошибок',
+        'Other changes': 'Прочие изменения'
+    }
+
+    tasks_by_change = {}
+    for issue in issues:
+        change_value = issue['fields'].get(change_field_id, '')
+
+        if isinstance(change_value, dict):
+            change_text = change_value.get('value', '')
+        else:
+            change_text = str(change_value) if change_value else ''
+
+        logger.info(f"Группировка по Change: '{change_text}' для задачи {issue['key']}")
+
+        russian_change = change_mapping.get(change_text, change_text)
+
+        if russian_change not in tasks_by_change:
+            tasks_by_change[russian_change] = []
+        tasks_by_change[russian_change].append(issue)
+
+    return tasks_by_change
+
+
+class EmailClient:
+    def __init__(self, smtp_client, jira_client, product_name: str, project_name: str, jira_external_url: str,
+                 project_key: str):
+        self.smtp_client = smtp_client
+        self.jira_client = jira_client
         self.product_name = product_name
         self.project_name = project_name
         self.jira_external_url = jira_external_url
         self.project_key = project_key
 
-    def filter_issues_by_change(self, issues: List[Dict], change_field_id: str) -> List[Dict]:
-        filtered = []
-        for issue in issues:
-            if change_field_id and change_field_id in issue['fields']:
-                change_value = issue['fields'][change_field_id]
-                if change_value:
-                    if isinstance(change_value, dict):
-                        change_text = change_value.get('value', '')
-                    else:
-                        change_text = str(change_value)
+    def get_latest_release_version(self):
+        try:
+            project = self.jira_client.project(self.project_key)
+            versions = self.jira_client.project_versions(project)
 
-                    if change_text:
-                        filtered.append(issue)
-                        logger.info(f"Задача {issue['key']} включена в письмо с Change: '{change_text}'")
-                    else:
-                        logger.info(f"Задача {issue['key']} исключена - пустое значение Change")
-                else:
-                    logger.info(f"Задача {issue['key']} исключена - пустое поле Change")
-            else:
-                logger.info(f"Задача {issue['key']} исключена - поле Change отсутствует")
-        return filtered
+            released_versions = [v for v in versions if v.released]
 
-    def group_tasks_by_change(self, issues: List[Dict], change_field_id: str) -> Dict[str, List[Dict]]:
-        change_mapping = {
-            'New features': 'Новая функциональность',
-            'Functionality update': 'Обновление существующей функциональности',
-            'Performance enhancements': 'Улучшения производительности и технические доработки',
-            'Bug fixes': 'Исправление ошибок',
-            'Other changes': 'Прочие изменения'
-        }
+            if released_versions:
+                latest_version = max(released_versions, key=lambda x: x.releaseDate or '')
+                return latest_version.name
+            elif versions:
+                latest_version = max(versions, key=lambda x: x.id)
+                return latest_version.name
 
-        tasks_by_change = {}
-        for issue in issues:
-            change_value = issue['fields'].get(change_field_id, '')
+        except Exception as e:
+            logger.error(f"Ошибка получения версий: {e}")
 
-            if isinstance(change_value, dict):
-                change_text = change_value.get('value', '')
-            else:
-                change_text = str(change_value) if change_value else ''
-
-            logger.info(f"Найдено значение Change: '{change_text}' для задачи {issue['key']}")
-
-            russian_change = change_mapping.get(change_text, change_text)
-
-            if russian_change not in tasks_by_change:
-                tasks_by_change[russian_change] = []
-            tasks_by_change[russian_change].append(issue)
-
-        return tasks_by_change
+        return None
 
     def generate_subject(self, filtered_issues: List[Dict], version: str = None, is_startup: bool = False) -> str:
         task_count = len(filtered_issues)
@@ -76,8 +79,7 @@ class EmailGenerator:
         logger.info(f"Сформирована тема письма: {subject}")
         return subject
 
-    def generate_email_content(self, issues_data: Dict[str, Any], version: str = None, is_startup: bool = False) -> \
-    Tuple[str, str]:
+    def generate_html_content(self, issues_data: Dict[str, Any], is_startup: bool = False) -> Tuple[str, str]:
         issues_list = issues_data.get('issues', [])
         release_title_field_id = issues_data.get('release_title_field_id')
         change_field_id = issues_data.get('change_field_id')
@@ -86,15 +88,10 @@ class EmailGenerator:
             logger.info("Нет задач для формирования письма")
             return "", ""
 
-        filtered_issues = self.filter_issues_by_change(issues_list, change_field_id)
+        version = self.get_latest_release_version()
+        subject = self.generate_subject(issues_list, version, is_startup)
 
-        if not filtered_issues:
-            logger.info("Нет задач с заполненным полем Change для формирования письма")
-            return "", ""
-
-        subject = self.generate_subject(filtered_issues, version, is_startup)
-
-        tasks_by_change = self.group_tasks_by_change(filtered_issues, change_field_id)
+        tasks_by_change = group_tasks_by_change(issues_list, change_field_id)
 
         change_order = [
             'Новая функциональность',
@@ -118,20 +115,7 @@ class EmailGenerator:
                     task_counter += 1
                     task_key = issue['key']
 
-                    release_title = ""
-                    if release_title_field_id and release_title_field_id in issue['fields']:
-                        release_title_value = issue['fields'][release_title_field_id]
-                        if release_title_value:
-                            release_title = release_title_value
-                            logger.info(f"Найден Release title для задачи {task_key}: '{release_title_value}'")
-                        else:
-                            logger.info(f"Release title пустой для задачи {task_key}")
-                    else:
-                        if release_title_field_id:
-                            logger.warning(
-                                f"Поле Release title {release_title_field_id} не найдено в данных задачи {task_key}")
-                        else:
-                            logger.info(f"ID поля Release title не определен для задачи {task_key}")
+                    release_title = issue['fields'].get(release_title_field_id, '') if release_title_field_id else ''
 
                     if release_title:
                         changes_html += f'{group_counter}.{task_counter}. <a href="{self.jira_external_url}/browse/{task_key}">{release_title}</a><br>'
@@ -150,11 +134,7 @@ class EmailGenerator:
                     task_counter += 1
                     task_key = issue['key']
 
-                    release_title = ""
-                    if release_title_field_id and release_title_field_id in issue['fields']:
-                        release_title_value = issue['fields'][release_title_field_id]
-                        if release_title_value:
-                            release_title = release_title_value
+                    release_title = issue['fields'].get(release_title_field_id, '') if release_title_field_id else ''
 
                     if release_title:
                         changes_html += f'{group_counter}.{task_counter}. <a href="{self.jira_external_url}/browse/{task_key}">{release_title}</a><br>'
@@ -163,7 +143,7 @@ class EmailGenerator:
 
                 changes_html += "<br>"
 
-        greeting_text = f"Вышла новая версия {self.product_name} {version}" if version else f"Выполнены задачи проекта {self.project_key}. Всего задач: {len(filtered_issues)}"
+        greeting_text = f"Вышла новая версия {self.product_name} {version}" if version else f"Выполнены задачи проекта {self.project_key}. Всего задач: {len(issues_list)}"
 
         html_content = f"""
         <html>
@@ -181,6 +161,41 @@ class EmailGenerator:
 
         logger.info("HTML содержимое письма сформировано")
         return subject, html_content
+
+    def send_email(self, recipients: List[str], subject: str, html_content: str) -> bool:
+        try:
+            with self.smtp_client.get_connection() as server:
+                msg = MIMEMultipart('alternative')
+                msg['Subject'] = subject
+                msg['From'] = self.smtp_client.email_user
+                msg['To'] = ', '.join(recipients)
+
+                html_part = MIMEText(html_content, 'html', 'utf-8')
+                msg.attach(html_part)
+
+                server.send_message(msg)
+
+            logger.info(f"Email отправлен получателям: {', '.join(recipients)}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка отправки email: {e}")
+            return False
+
+    def send_simple_email(self, recipients: List[str], subject: str, text_content: str) -> bool:
+        try:
+            with self.smtp_client.get_connection() as server:
+                msg = MIMEText(text_content, 'plain', 'utf-8')
+                msg['Subject'] = subject
+                msg['From'] = self.smtp_client.email_user
+                msg['To'] = ', '.join(recipients)
+
+                server.send_message(msg)
+
+            logger.info(f"Простое email отправлено получателям: {', '.join(recipients)}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка отправки простого email: {e}")
+            return False
 
     def generate_simple_notification(self, issue_key: str, summary: str) -> Tuple[str, str]:
         subject = f"Задача {issue_key} выполнена"
