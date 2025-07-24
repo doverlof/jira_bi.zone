@@ -15,8 +15,7 @@ class Settings(BaseSettings):
     )
 
     jira_url: str
-    jira_user: str
-    jira_password: SecretStr
+    jira_token: SecretStr
     jira_project_key: str
     jira_external_url: str
 
@@ -39,12 +38,6 @@ class Settings(BaseSettings):
 
     redis_host: str = "redis"
     redis_port: int = 6379
-
-    @classmethod
-    def validate_recipients(cls, v):
-        if not v:
-            raise ValueError('Список получателей не может быть пустым')
-        return v
 
     @property
     def recipients_list(self) -> List[str]:

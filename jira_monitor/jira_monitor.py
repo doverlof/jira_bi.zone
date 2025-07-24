@@ -1,10 +1,4 @@
-import requests
-from requests.auth import HTTPBasicAuth
-
-from .clients.smtp_client import SMTPClient
-from .clients.jira_auth import JiraAuth
-from .clients.jira_issues import JiraIssues
-from .clients.email_generator import EmailGenerator
+from .clients import SMTPClient, UserClient, IssuesClient, EmailClient
 from .logger_config import setup_logger
 from .config import settings
 
@@ -14,8 +8,7 @@ logger = setup_logger()
 class JiraCompletedMonitor:
     def __init__(self):
         self.jira_url = settings.jira_url
-        self.jira_user = settings.jira_user
-        self.jira_password = settings.jira_password.get_secret_value()
+        self.jira_token = settings.jira_token.get_secret_value()
         self.project_key = settings.jira_project_key
         self.jira_external_url = settings.jira_external_url
         self.product_name = settings.product_name
@@ -33,134 +26,90 @@ class JiraCompletedMonitor:
             email_password=settings.email_password.get_secret_value()
         )
 
-        self.jira_auth = JiraAuth(
+        self.user_client = UserClient(
             jira_url=self.jira_url,
-            jira_user=self.jira_user,
-            jira_password=self.jira_password
+            jira_token=self.jira_token
         )
 
-        self.jira_issues = JiraIssues(
-            jira_url=self.jira_url,
-            auth=self.jira_auth.get_auth(),
+        jira_client = self.user_client.jira
+
+        self.issues_client = IssuesClient(
+            jira_client=jira_client,
             project_key=self.project_key,
             report_day=self.report_day,
             report_hour=self.report_hour,
             report_minute=self.report_minute
         )
 
-        self.email_generator = EmailGenerator(
+        self.email_client = EmailClient(
+            smtp_client=self.smtp_client,
+            jira_client=jira_client,
             product_name=self.product_name,
             project_name=self.project_name,
             jira_external_url=self.jira_external_url,
             project_key=self.project_key
         )
 
-    def get_latest_release_version(self):
-        url = f"{self.jira_url}/rest/api/2/project/{self.project_key}/versions"
+    def test_connections(self) -> bool:
+        try:
+            with self.smtp_client.get_connection() as server:
+                pass
+            smtp_ok = True
+            logger.info("SMTP тест успешен")
+        except Exception as e:
+            logger.error(f"SMTP тест неудачен: {e}")
+            smtp_ok = False
 
         try:
-            response = requests.get(
-                url,
-                auth=HTTPBasicAuth(self.jira_user, self.jira_password),
-                timeout=30
-            )
-            response.raise_for_status()
-            versions = response.json()
-
-            released_versions = [v for v in versions if v.get('released', False)]
-
-            if released_versions:
-                latest_version = max(released_versions, key=lambda x: x.get('releaseDate', ''))
-                return latest_version['name']
-            elif versions:
-                latest_version = max(versions, key=lambda x: x.get('id', 0))
-                return latest_version['name']
-
+            self.user_client.jira.myself()
+            user_ok = True
+            logger.info("Jira тест успешен")
         except Exception as e:
-            logger.error(f"Ошибка получения версий: {e}")
+            logger.error(f"Jira тест неудачен: {e}")
+            user_ok = False
 
-        return None
+        return smtp_ok and user_ok
 
     def get_completed_issues(self):
-        logger.info(f"Настройки периода: {self.report_day}-е число в {self.report_hour:02d}:{self.report_minute:02d}")
-
-        release_title_field = self.release_title_field_id
-        if release_title_field:
-            logger.info(f"Использую ID поля Release title из конфигурации: {release_title_field}")
-        else:
-            logger.info("ID поля Release title не задан в конфигурации, выполняю автоматический поиск...")
-
-        change_field = self.change_field_id
-        if change_field:
-            logger.info(f"Использую ID поля Change из конфигурации: {change_field}")
-        else:
-            logger.info("ID поля Change не задан в конфигурации, выполняю автоматический поиск...")
-
-        return self.jira_issues.get_completed_issues(
-            release_title_field_id=release_title_field,
-            change_field_id=change_field
+        return self.issues_client.filter_completed_issues(
+            release_title_field_id=self.release_title_field_id,
+            change_field_id=self.change_field_id
         )
 
     def send_batch_notification(self, issues_data, is_startup=False):
-        if not issues_data:
-            logger.info("Нет данных о задачах для отправки")
+        if not issues_data or not issues_data.get('issues'):
+            logger.info("Нет задач для отправки")
             return True
 
-        version = self.get_latest_release_version()
-
-        subject, html_content = self.email_generator.generate_email_content(
+        subject, html_content = self.email_client.generate_html_content(
             issues_data=issues_data,
-            version=version,
             is_startup=is_startup
         )
 
         if not subject or not html_content:
-            logger.info("Нет задач с заполненным полем Change для отправки")
+            logger.info("Не удалось сформировать содержимое письма")
             return True
 
-        success = self.smtp_client.send_email(
+        success = self.email_client.send_email(
             recipients=settings.recipients_list,
             subject=subject,
             html_content=html_content
         )
 
         if success:
-            if isinstance(issues_data, dict):
-                issues_list = issues_data.get('issues', [])
-                change_field_id = issues_data.get('change_field_id')
-
-                filtered_keys = []
-                for issue in issues_list:
-                    if change_field_id and change_field_id in issue['fields']:
-                        change_value = issue['fields'][change_field_id]
-                        if change_value:
-                            if isinstance(change_value, dict):
-                                change_text = change_value.get('value', '')
-                            else:
-                                change_text = str(change_value)
-
-                            if change_text:
-                                filtered_keys.append(issue['key'])
-
-                if filtered_keys:
-                    logger.info(f"Email отправлен для задач: {', '.join(filtered_keys)}")
-                else:
-                    logger.info("Email отправлен, но задачи для логирования не найдены")
-            else:
-                logger.info("Email отправлен")
-
+            logger.info("Email успешно отправлен")
             return True
         else:
             logger.error("Ошибка отправки email")
             return False
 
     def send_simple_notification(self, issue_key: str, summary: str):
-        subject, text_content = self.email_generator.generate_simple_notification(
+        subject, text_content = self.email_client.generate_simple_notification(
             issue_key=issue_key,
             summary=summary
         )
 
-        success = self.smtp_client.send_simple_email(
+        success = self.email_client.send_simple_email(
             recipients=settings.recipients_list,
             subject=subject,
             text_content=text_content
