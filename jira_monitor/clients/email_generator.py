@@ -2,19 +2,12 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import List, Dict, Any, Tuple
 from ..logger_config import setup_logger
+from ..config import CHANGE_MAPPING, CHANGE_ORDER
 
 logger = setup_logger()
 
 
 def group_tasks_by_change(issues: List[Dict], change_field_id: str) -> Dict[str, List[Dict]]:
-    change_mapping = {
-        'New features': 'Новая функциональность',
-        'Functionality update': 'Обновление существующей функциональности',
-        'Performance enhancements': 'Улучшения производительности и технические доработки',
-        'Bug fixes': 'Исправление ошибок',
-        'Other changes': 'Прочие изменения'
-    }
-
     tasks_by_change = {}
     for issue in issues:
         change_value = issue['fields'].get(change_field_id, '')
@@ -26,7 +19,7 @@ def group_tasks_by_change(issues: List[Dict], change_field_id: str) -> Dict[str,
 
         logger.info(f"Группировка по Change: '{change_text}' для задачи {issue['key']}")
 
-        russian_change = change_mapping.get(change_text, change_text)
+        russian_change = CHANGE_MAPPING.get(change_text, change_text)
 
         if russian_change not in tasks_by_change:
             tasks_by_change[russian_change] = []
@@ -93,18 +86,10 @@ class EmailClient:
 
         tasks_by_change = group_tasks_by_change(issues_list, change_field_id)
 
-        change_order = [
-            'Новая функциональность',
-            'Обновление существующей функциональности',
-            'Улучшения производительности и технические доработки',
-            'Исправление ошибок',
-            'Прочие изменения'
-        ]
-
         changes_html = ""
         group_counter = 0
 
-        for change_type in change_order:
+        for change_type in CHANGE_ORDER:
             if change_type in tasks_by_change:
                 group_counter += 1
                 tasks = tasks_by_change[change_type]
@@ -125,7 +110,7 @@ class EmailClient:
                 changes_html += "<br>"
 
         for change_type, tasks in tasks_by_change.items():
-            if change_type not in change_order:
+            if change_type not in CHANGE_ORDER:
                 group_counter += 1
                 changes_html += f"{group_counter}. <strong>{change_type}:</strong><br>"
 

@@ -2,12 +2,15 @@ from celery import Celery
 from celery.schedules import crontab
 from jira_monitor.config import settings
 
+redis = settings.redis_settings
+
 app = Celery('jira_monitor',
-             broker=settings.redis_url,
-             backend=settings.redis_url)
+             broker=redis.redis_url,
+             backend=redis.redis_url)
 
 app.config_from_object('celeryconfig')
 
+report = settings.report_settings
 app.conf.update(
     beat_schedule={
         'check-jira-tasks': {
