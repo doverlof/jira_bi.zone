@@ -5,49 +5,57 @@ from .config import settings
 logger = setup_logger()
 
 
+def create_smtp_client() -> SMTPClient:
+    return SMTPClient(
+        smtp_server=settings.smtp_server,
+        smtp_port=settings.smtp_port,
+        email_user=settings.email_user,
+        email_password=settings.email_password.get_secret_value()
+    )
+
+
+def create_jira_client() -> JiraClient:
+    return JiraClient(
+        jira_url=settings.jira_url,
+        jira_token=settings.jira_token.get_secret_value(),
+        project_key=settings.jira_project_key,
+        report_day=settings.report_day_of_month,
+        report_hour=settings.report_hour,
+        report_minute=settings.report_minute
+    )
+
+
+def create_email_client(smtp_client: SMTPClient, jira_client: JiraClient) -> EmailClient:
+    return EmailClient(
+        smtp_client=smtp_client,
+        jira_client=jira_client.jira,
+        product_name=settings.product_name,
+        project_name=settings.project_name,
+        jira_external_url=settings.jira_external_url,
+        project_key=settings.jira_project_key
+    )
+
+
 class JiraCompletedMonitor:
-    def __init__(self):
+    def __init__(self, smtp_client: SMTPClient, jira_client: JiraClient, email_client: EmailClient):
+        self.smtp_client = smtp_client
+        self.jira_client = jira_client
+        self.email_client = email_client
+
         self.jira_url = settings.jira_url
-        self.jira_token = settings.jira_token.get_secret_value()
         self.project_key = settings.jira_project_key
-        self.jira_external_url = settings.jira_external_url
-        self.product_name = settings.product_name
-        self.project_name = settings.project_name
-        self.report_day = settings.report_day_of_month
-        self.report_hour = settings.report_hour
-        self.report_minute = settings.report_minute
-        self.release_title_field_id = settings.release_title_field_id
-        self.change_field_id = settings.change_field_id
 
-        self.smtp_client = SMTPClient(
-            smtp_server=settings.smtp_server,
-            smtp_port=settings.smtp_port,
-            email_user=settings.email_user,
-            email_password=settings.email_password.get_secret_value()
-        )
-
-        self.jira_client = JiraClient(
-            jira_url=self.jira_url,
-            jira_token=self.jira_token,
-            project_key=self.project_key,
-            report_day=self.report_day,
-            report_hour=self.report_hour,
-            report_minute=self.report_minute
-        )
-
-        self.email_client = EmailClient(
-            smtp_client=self.smtp_client,
-            jira_client=self.jira_client.jira,
-            product_name=self.product_name,
-            project_name=self.project_name,
-            jira_external_url=self.jira_external_url,
-            project_key=self.project_key
-        )
+    @classmethod
+    def create_default(cls):
+        smtp_client = create_smtp_client()
+        jira_client = create_jira_client()
+        email_client = create_email_client(smtp_client, jira_client)
+        return cls(smtp_client, jira_client, email_client)
 
     def test_connections(self) -> bool:
         try:
             with self.smtp_client.get_connection() as server:
-                pass
+                logger.debug(f"SMTP сервер подключен: {server.sock.getpeername()}")
             smtp_ok = True
             logger.info("SMTP тест успешен")
         except Exception as e:
@@ -66,8 +74,8 @@ class JiraCompletedMonitor:
 
     def get_completed_issues(self):
         return self.jira_client.filter_completed_issues(
-            release_title_field_id=self.release_title_field_id,
-            change_field_id=self.change_field_id
+            release_title_field_id=settings.release_title_field_id,
+            change_field_id=settings.change_field_id
         )
 
     def send_batch_notification(self, issues_data, is_startup=False):

@@ -1,6 +1,7 @@
 from celery_app import app
 from datetime import datetime
 
+from . import settings
 from .jira_monitor import JiraCompletedMonitor
 from .logger_config import setup_logger
 
@@ -9,7 +10,7 @@ logger = setup_logger()
 @app.task(bind=True, max_retries=3)
 def check_jira_tasks(self):
     try:
-        monitor = JiraCompletedMonitor()
+        monitor = JiraCompletedMonitor.create_default()
         logger.info("Отправка ежемесячного отчета...")
 
         data, status_name = monitor.get_completed_issues()
@@ -36,7 +37,7 @@ def check_jira_tasks(self):
 @app.task(bind=True, max_retries=2)
 def startup_check_jira_tasks(self):
     try:
-        monitor = JiraCompletedMonitor()
+        monitor = JiraCompletedMonitor.create_default()
         logger.info("Стартовая проверка отчета...")
 
         data, status_name = monitor.get_completed_issues()
@@ -72,11 +73,11 @@ def reset_notifications():
 @app.task
 def get_status():
     try:
-        monitor = JiraCompletedMonitor()
+        monitor = JiraCompletedMonitor.create_default()
         return {
             'jira_url': monitor.jira_url,
             'project_key': monitor.project_key,
-            'recipients': monitor.recipients,
+            'recipients': settings.recipients_list,
             'timestamp': datetime.now().isoformat(),
             'status': 'Система отправляет периодические отчеты за указанный период'
         }
