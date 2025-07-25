@@ -1,8 +1,8 @@
 from celery_app import app
 from datetime import datetime
 
-from . import settings
-from .jira_monitor import JiraCompletedMonitor
+from .config import settings
+from .jira_monitor import JiraCompletedMonitor, create_smtp_client, create_jira_client, create_email_client
 from .logger_config import setup_logger
 
 logger = setup_logger()
@@ -10,7 +10,11 @@ logger = setup_logger()
 @app.task(bind=True, max_retries=3)
 def check_jira_tasks(self):
     try:
-        monitor = JiraCompletedMonitor.create_default()
+        smtp_client = create_smtp_client()
+        jira_client = create_jira_client()
+        email_client = create_email_client(smtp_client, jira_client)
+        monitor = JiraCompletedMonitor(smtp_client, jira_client, email_client)
+
         logger.info("Отправка ежемесячного отчета...")
 
         data, status_name = monitor.get_completed_issues()
@@ -37,7 +41,11 @@ def check_jira_tasks(self):
 @app.task(bind=True, max_retries=2)
 def startup_check_jira_tasks(self):
     try:
-        monitor = JiraCompletedMonitor.create_default()
+        smtp_client = create_smtp_client()
+        jira_client = create_jira_client()
+        email_client = create_email_client(smtp_client, jira_client)
+        monitor = JiraCompletedMonitor(smtp_client, jira_client, email_client)
+
         logger.info("Стартовая проверка отчета...")
 
         data, status_name = monitor.get_completed_issues()
@@ -73,11 +81,13 @@ def reset_notifications():
 @app.task
 def get_status():
     try:
-        monitor = JiraCompletedMonitor.create_default()
+        jira = settings.jira_settings
+        email = settings.email_settings
+
         return {
-            'jira_url': monitor.jira_url,
-            'project_key': monitor.project_key,
-            'recipients': settings.recipients_list,
+            'jira_url': jira.jira_url,
+            'project_key': jira.jira_project_key,
+            'recipients': email.recipients_list,
             'timestamp': datetime.now().isoformat(),
             'status': 'Система отправляет периодические отчеты за указанный период'
         }

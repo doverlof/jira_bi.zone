@@ -1,7 +1,9 @@
 from jira_monitor.config import settings
 
-broker_url = settings.redis_url
-result_backend = settings.redis_url
+redis = settings.redis_settings
+
+broker_url = redis.redis_url
+result_backend = redis.redis_url
 
 task_serializer = 'json'
 accept_content = ['json']
